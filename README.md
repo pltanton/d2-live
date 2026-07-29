@@ -48,7 +48,24 @@ keeps its own pan/zoom position.
 - `--no-browser` register the file without opening a browser
 - `--sketch` start the tab in sketch mode
 - `--idle-timeout DUR` exit after this long with no connected tabs (default `10m`, `0` = never)
+- `--close` unregister the file (or every `*.d2` under the directory) from the running server and exit
 - `--lsp` run as a language server over stdio (see below)
+
+## Unregistering files
+
+Files leave the server three ways:
+
+```bash
+d2-live --close diagram.d2      # explicitly, without touching the file
+```
+
+Deleting a diagram on disk drops it automatically (the watcher waits out the
+debounce first, so a save that writes a temp file and renames it over the target
+is not mistaken for a deletion). In LSP mode, closing the buffer unregisters the
+file too — reopening it registers it again.
+
+Tabs viewing a file that goes away reload onto a file the server still has,
+rather than showing a render failure.
 
 ## Editor integration (LSP)
 
@@ -78,8 +95,18 @@ language-servers = ["d2-live"]
 `d2-live` must be on Helix's `PATH` (use an absolute `command` otherwise). Open
 any `.d2` file and the preview appears automatically.
 
+## Development
+
+```bash
+go test ./...                                    # unit tests
+go build -o d2-live . && ./scripts/itest.py ./d2-live   # end-to-end: LSP stdio, CLI, watcher, prune
+```
+
+The end-to-end script drives a real binary in an isolated `XDG_RUNTIME_DIR`, so
+it never touches a server you have running.
+
 ## Notes
 
 - PNG export uses native `d2` rendering, so tooltips and other D2-specific export details come through there.
 - SVG copy is exported as an SVG file object in the browser clipboard.
-- Server discovery uses a lock file under `$XDG_RUNTIME_DIR/d2-live/` (with a `$XDG_CACHE_HOME`/temp fallback); concurrent first launches resolve to a single server via an exclusive `flock`.
+- Server discovery uses a lock file under `$XDG_RUNTIME_DIR/d2-live/` (with a `$XDG_CACHE_HOME`/temp fallback); concurrent first launches resolve to a single server via an exclusive `flock`. The lock is held in a package-level variable on purpose: `os.File` has a finalizer that closes the fd, and a closed fd releases the `flock` — a lock kept only in a local variable can be collected mid-run, which used to let a second server start alongside a healthy one.

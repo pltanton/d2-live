@@ -843,6 +843,7 @@ func main() {
 	var noBrowser bool
 	var sketch bool
 	var lsp bool
+	var closeFiles bool
 	var idle time.Duration
 
 	flag.StringVar(&layout, "layout", "elk", "D2 layout engine")
@@ -851,6 +852,7 @@ func main() {
 	flag.BoolVar(&noBrowser, "no-browser", false, "Do not open browser automatically")
 	flag.BoolVar(&sketch, "sketch", false, "Enable sketch mode")
 	flag.BoolVar(&lsp, "lsp", false, "Run as a Language Server over stdio (for editor integration)")
+	flag.BoolVar(&closeFiles, "close", false, "Unregister the file (or directory) from the running server and exit")
 	flag.DurationVar(&idle, "idle-timeout", 10*time.Minute, "Exit after this long with no connected tabs (0 = never)")
 	flag.Parse()
 
@@ -862,7 +864,12 @@ func main() {
 	}
 
 	if flag.NArg() != 1 {
-		log.Fatalf("usage: d2-live [--layout L] [--port P] [--browser B] [--no-browser] [--sketch] [--idle-timeout DUR] <input.d2 | dir>\n       d2-live --lsp   (language-server mode for editors)")
+		log.Fatalf("usage: d2-live [--layout L] [--port P] [--browser B] [--no-browser] [--sketch] [--idle-timeout DUR] <input.d2 | dir>\n       d2-live --close <input.d2 | dir>   (unregister from the running server)\n       d2-live --lsp   (language-server mode for editors)")
+	}
+
+	if closeFiles {
+		runClose(flag.Arg(0))
+		return
 	}
 
 	files, err := resolveInputs(flag.Arg(0))
@@ -873,11 +880,45 @@ func main() {
 	runCLI(files, layout, sketch, browser, noBrowser, port, idle)
 }
 
+// runClose unregisters files from the running server and returns. It never
+// starts a server: with nothing running there is nothing to unregister. Paths
+// that no longer exist are accepted, so a deleted diagram can be dropped too.
+func runClose(arg string) {
+	info, err := readServerInfo()
+	if err != nil || !ping(info.Port) {
+		log.Fatal("d2-live: no running server to unregister from")
+	}
+
+	abs, err := filepath.Abs(arg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	files := []string{abs}
+	if st, err := os.Stat(abs); err == nil && st.IsDir() {
+		found, err := resolveInputs(abs)
+		if err != nil {
+			log.Fatal(err)
+		}
+		files = found
+	}
+
+	closed := 0
+	for _, f := range files {
+		if err := postClose(info.Port, f); err != nil {
+			log.Printf("d2-live: %s: %v", filepath.Base(f), err)
+			continue
+		}
+		closed++
+	}
+	log.Printf("d2-live: unregistered %d file(s) from http://127.0.0.1:%d", closed, info.Port)
+}
+
 // runCLI is the default, foreground behavior: become the shared preview server
 // (and block, logging the URL) or, if one is already running, register the
 // files with it, open a tab and return.
 func runCLI(files []string, layout string, sketch bool, browser string, noBrowser bool, port int, idle time.Duration) {
-	lock, ln, srvPort, isServer, err := acquireOrConnect(port)
+	ln, srvPort, isServer, err := acquireOrConnect(port)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -893,7 +934,7 @@ func runCLI(files []string, layout string, sketch bool, browser string, noBrowse
 		return
 	}
 
-	defer lock.Close()
+	defer releaseServerLock()
 	defer os.Remove(infoPath())
 
 	s := newServer(layout, idle)
@@ -1019,14 +1060,32 @@ func ping(port int) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// serverLock holds the exclusive flock of the process that became the shared
+// server. It is a package-level variable on purpose: os.File carries a
+// finalizer that closes the fd, and closing the fd releases the flock. A lock
+// kept only in a local variable the caller stops using can therefore be
+// collected mid-run, silently unlocking the file and letting the next
+// invocation start a *second* server. As a GC root, this variable cannot be
+// collected for the lifetime of the process.
+var serverLock *os.File
+
+// releaseServerLock unlocks and forgets the server lock. Only the process that
+// owns the lock should call it, on its way out.
+func releaseServerLock() {
+	if serverLock != nil {
+		serverLock.Close()
+		serverLock = nil
+	}
+}
+
 // acquireOrConnect tries to become the single shared preview server. On success
-// it returns the held lock file, a bound listener, and the chosen port with
-// isServer=true. If another healthy server already holds the lock it returns
-// that server's port with isServer=false (lock and listener are nil).
-func acquireOrConnect(port int) (lock *os.File, ln net.Listener, srvPort int, isServer bool, err error) {
+// it stores the exclusive lock in serverLock and returns a bound listener and
+// the chosen port with isServer=true. If another healthy server already holds
+// the lock it returns that server's port with isServer=false (listener nil).
+func acquireOrConnect(port int) (ln net.Listener, srvPort int, isServer bool, err error) {
 	lock, locked, err := acquireLock(lockPath())
 	if err != nil {
-		return nil, nil, 0, false, err
+		return nil, 0, false, err
 	}
 	if !locked {
 		// Another instance holds the lock; wait for it to publish a healthy
@@ -1034,10 +1093,10 @@ func acquireOrConnect(port int) (lock *os.File, ln net.Listener, srvPort int, is
 		deadline := time.Now().Add(3 * time.Second)
 		for {
 			if info, e := readServerInfo(); e == nil && ping(info.Port) {
-				return nil, nil, info.Port, false, nil
+				return nil, info.Port, false, nil
 			}
 			if time.Now().After(deadline) {
-				return nil, nil, 0, false, fmt.Errorf("a d2-live server holds the lock but never became ready")
+				return nil, 0, false, fmt.Errorf("a d2-live server holds the lock but never became ready")
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -1046,15 +1105,16 @@ func acquireOrConnect(port int) (lock *os.File, ln net.Listener, srvPort int, is
 	ln, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		lock.Close()
-		return nil, nil, 0, false, fmt.Errorf("listen: %w", err)
+		return nil, 0, false, fmt.Errorf("listen: %w", err)
 	}
 	srvPort = ln.Addr().(*net.TCPAddr).Port
 	if err := writeServerInfo(serverInfo{Port: srvPort, PID: os.Getpid()}); err != nil {
 		ln.Close()
 		lock.Close()
-		return nil, nil, 0, false, err
+		return nil, 0, false, err
 	}
-	return lock, ln, srvPort, true, nil
+	serverLock = lock
+	return ln, srvPort, true, nil
 }
 
 func previewURL(port int, file string, sketch bool, layout string) string {
@@ -1092,6 +1152,23 @@ func postOpen(port int, path string, sketch bool, layout string) error {
 	return nil
 }
 
+func postClose(port int, path string) error {
+	body, err := json.Marshal(map[string]any{"path": path})
+	if err != nil {
+		return err
+	}
+	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/close", port),
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("close failed: %s", resp.Status)
+	}
+	return nil
+}
+
 // ---- server side ----
 
 // start wires the routes, kicks off the watch and idle goroutines, and serves
@@ -1103,6 +1180,7 @@ func (s *server) start(ln net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/open", s.handleOpen)
+	mux.HandleFunc("/close", s.handleClose)
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/favicon.png", handleFavicon)
 	mux.HandleFunc("/svg", s.handleSVG)
@@ -1133,12 +1211,12 @@ type didOpenParams struct {
 // shared preview server and opens a browser tab. Reloads are handled by the
 // server's file watcher, so saving the buffer is enough to refresh.
 func runLSP(layout string, sketch bool, browser string, noBrowser bool, port int, idle time.Duration) {
-	lock, ln, srvPort, isServer, err := acquireOrConnect(port)
+	ln, srvPort, isServer, err := acquireOrConnect(port)
 	if err != nil {
 		log.Fatalf("d2-live lsp: %v", err)
 	}
 	if isServer {
-		_ = lock // held for the lifetime of this process
+		defer releaseServerLock()
 		s := newServer(layout, idle)
 		go func() {
 			if e := s.start(ln); e != nil && e != http.ErrServerClosed {
@@ -1193,6 +1271,21 @@ func runLSP(layout string, sketch bool, browser string, noBrowser bool, port int
 				continue
 			}
 			maybeOpen(browser, noBrowser, srvPort, path, sketch, layout)
+		case "textDocument/didClose":
+			var p didOpenParams
+			if json.Unmarshal(msg.Params, &p) != nil {
+				continue
+			}
+			path := uriToPath(p.TextDocument.URI)
+			if path == "" || !opened[path] {
+				continue
+			}
+			delete(opened, path)
+			// Closing the buffer takes the diagram out of the preview's file
+			// list; reopening it registers it again.
+			if err := postClose(srvPort, path); err != nil {
+				log.Printf("d2-live lsp: close %s: %v", path, err)
+			}
 		}
 	}
 }
@@ -1321,6 +1414,55 @@ func (s *server) register(abs string) {
 	}
 }
 
+// unregister drops a file from the server: it stops watching it, releases its
+// cached renders and any pending rerender, and nudges tabs that were showing it
+// so they reload onto a file that is still open. Reports whether the file was
+// registered in the first place.
+func (s *server) unregister(abs string) bool {
+	s.mu.Lock()
+	entry, ok := s.files[abs]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+	delete(s.files, abs)
+
+	if timer := s.debounce[abs]; timer != nil {
+		timer.Stop()
+		delete(s.debounce, abs)
+	}
+
+	prefix := abs + "|"
+	for key := range s.cache {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.cache, key)
+		}
+	}
+
+	dir := filepath.Dir(abs)
+	if s.watchedDirs[dir] > 0 {
+		s.watchedDirs[dir]--
+		if s.watchedDirs[dir] == 0 {
+			delete(s.watchedDirs, dir)
+			// Best-effort: the watch may already be gone if the directory was
+			// removed along with the file.
+			_ = s.watcher.Remove(dir)
+		}
+	}
+	_ = s.watcher.Remove(abs)
+	s.mu.Unlock()
+
+	s.subMu.Lock()
+	for ch := range entry.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	s.subMu.Unlock()
+	return true
+}
+
 func (s *server) fileList() []fileMeta {
 	s.mu.Lock()
 	out := make([]fileMeta, 0, len(s.files))
@@ -1409,6 +1551,14 @@ func (s *server) scheduleRerender(abs string) {
 		timer.Stop()
 	}
 	s.debounce[abs] = time.AfterFunc(debounceDelay, func() {
+		// Editors often save by writing a temp file and renaming it over the
+		// target, which looks like a removal. Once the dust has settled, a path
+		// that is still missing really is gone: drop it instead of keeping a
+		// dropdown entry that can no longer render.
+		if _, err := os.Stat(abs); err != nil {
+			s.unregister(abs)
+			return
+		}
 		s.invalidate(abs)
 		s.notify(abs)
 	})
@@ -1564,12 +1714,44 @@ func (s *server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *server) handleClose(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	abs, err := filepath.Abs(req.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !s.unregister(abs) {
+		http.Error(w, "not registered", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	file := q.Get("file")
 	if file != "" {
 		if _, err := os.Stat(file); err == nil {
 			s.register(file)
+		} else {
+			// Stale link: the diagram was deleted or renamed away. Fall back to
+			// a file the server still serves instead of rendering a d2 failure.
+			file = ""
 		}
 	}
 
