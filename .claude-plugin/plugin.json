@@ -1,0 +1,11 @@
+{
+  "name": "d2-live",
+  "description": "Teaches Claude Code to drive the d2-live preview server: register *.d2 files with the single shared server, hand the user a live-reloading preview URL, and verify diagrams compile",
+  "version": "0.2.0",
+  "author": {
+    "name": "Anton Plotnikov"
+  },
+  "homepage": "https://github.com/pltanton/d2-live",
+  "repository": "https://github.com/pltanton/d2-live",
+  "keywords": ["d2", "diagrams", "preview", "live-reload", "visualization"]
+}

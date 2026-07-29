@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "d2-live",
+  "description": "The d2-live D2 diagram preview server, packaged as a Claude Code plugin",
+  "owner": {
+    "name": "Anton Plotnikov"
+  },
+  "plugins": [
+    {
+      "name": "d2-live",
+      "description": "Live D2 diagram previews: Claude registers the *.d2 files it edits with the shared d2-live server and gives you a self-refreshing preview URL",
+      "author": {
+        "name": "Anton Plotnikov"
+      },
+      "category": "productivity",
+      "source": "./",
+      "homepage": "https://github.com/pltanton/d2-live"
+    }
+  ]
+}

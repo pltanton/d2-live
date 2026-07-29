@@ -1,0 +1,138 @@
+#!/bin/sh
+# d2-live-preview — register *.d2 files with the single shared d2-live preview
+# server and print the preview URL.
+#
+#   usage: d2-live-preview [--open] <file.d2|dir>...
+#
+# Reuses a running server when there is one (so the tab the user already has
+# open keeps working), starts a detached one when there is not, and never
+# blocks the caller. Prints, on stdout:
+#
+#   server: http://127.0.0.1:PORT
+#   preview: http://127.0.0.1:PORT/?file=/abs/path.d2
+#
+# --open forces a browser tab even when a server was already running. A freshly
+# started server opens its own tab, so --open is not needed for the first file.
+
+set -eu
+
+open_tab=0
+if [ "${1:-}" = "--open" ]; then
+	open_tab=1
+	shift
+fi
+
+if [ $# -eq 0 ]; then
+	echo "usage: d2-live-preview [--open] <file.d2|dir>..." >&2
+	exit 2
+fi
+
+command -v d2-live >/dev/null 2>&1 || {
+	echo "d2-live-preview: d2-live is not on PATH (install it: nix profile install, or go install)" >&2
+	exit 127
+}
+
+state_dir() {
+	if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+		printf '%s\n' "$XDG_RUNTIME_DIR/d2-live"
+	elif [ -n "${XDG_CACHE_HOME:-}" ]; then
+		printf '%s\n' "$XDG_CACHE_HOME/d2-live"
+	elif [ "$(uname -s)" = "Darwin" ]; then
+		printf '%s\n' "$HOME/Library/Caches/d2-live"
+	else
+		printf '%s\n' "$HOME/.cache/d2-live"
+	fi
+}
+
+STATE=$(state_dir)
+INFO="$STATE/server.json"
+LOG="$STATE/d2-live.log"
+
+# live_port prints the port of a healthy server, or fails.
+live_port() {
+	[ -f "$INFO" ] || return 1
+	p=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' "$INFO")
+	[ -n "$p" ] || return 1
+	curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$p/healthz" || return 1
+	printf '%s\n' "$p"
+}
+
+abspath() {
+	case "$1" in
+	/*) printf '%s\n' "$1" ;;
+	*) printf '%s\n' "$PWD/${1#./}" ;;
+	esac
+}
+
+# Collect the absolute path of every *.d2 file named on the command line.
+list=$(mktemp)
+trap 'rm -f "$list"' EXIT INT TERM
+
+for arg in "$@"; do
+	if [ -d "$arg" ]; then
+		# Sorted, like the CLI, so the file the tab opens on is deterministic.
+		find "$(abspath "$arg")" -type f -name '*.d2' ! -path '*/.*/*' | sort >>"$list"
+	elif [ -f "$arg" ]; then
+		abspath "$arg" >>"$list"
+	else
+		echo "d2-live-preview: no such file or directory: $arg" >&2
+		echo "d2-live-preview: write the .d2 file first — d2-live only accepts paths that exist" >&2
+		exit 1
+	fi
+done
+
+if [ ! -s "$list" ]; then
+	echo "d2-live-preview: no *.d2 files found in: $*" >&2
+	exit 1
+fi
+
+first=$(head -n 1 "$list")
+started=0
+port=$(live_port || true)
+
+if [ -z "$port" ]; then
+	# No healthy server. Start one detached, so it survives this shell and keeps
+	# serving the preview. It registers `first` and opens the initial tab itself.
+	mkdir -p "$STATE"
+	nohup d2-live "$first" >"$LOG" 2>&1 &
+	started=1
+
+	i=0
+	while [ $i -lt 100 ]; do
+		port=$(live_port || true)
+		[ -n "$port" ] && break
+		sleep 0.1
+		i=$((i + 1))
+	done
+	if [ -z "$port" ]; then
+		echo "d2-live-preview: server did not come up within 10s; see $LOG" >&2
+		exit 1
+	fi
+fi
+
+# Register every file with the server. Absolute paths matter: the server
+# resolves relative paths against its own working directory, not ours.
+while IFS= read -r f; do
+	json_path=$(printf '%s' "$f" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+	curl -fsS -o /dev/null -X POST \
+		-H 'Content-Type: application/json' \
+		-d "{\"path\":\"$json_path\"}" \
+		"http://127.0.0.1:$port/open" ||
+		echo "d2-live-preview: failed to register $f" >&2
+done <"$list"
+
+url_file=$(printf '%s' "$first" | sed -e 's/ /%20/g' -e 's/#/%23/g' -e 's/?/%3F/g')
+base="http://127.0.0.1:$port"
+preview="$base/?file=$url_file"
+
+if [ "$open_tab" = 1 ] && [ "$started" = 0 ]; then
+	if command -v open >/dev/null 2>&1; then
+		open "$preview" >/dev/null 2>&1 || true
+	elif command -v xdg-open >/dev/null 2>&1; then
+		xdg-open "$preview" >/dev/null 2>&1 || true
+	fi
+fi
+
+printf 'server: %s\n' "$base"
+printf 'preview: %s\n' "$preview"
+printf 'files: %s\n' "$(wc -l <"$list" | tr -d ' ')"

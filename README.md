@@ -95,6 +95,38 @@ language-servers = ["d2-live"]
 `d2-live` must be on Helix's `PATH` (use an absolute `command` otherwise). Open
 any `.d2` file and the preview appears automatically.
 
+## Claude Code integration
+
+`skills/d2-live/` is a Claude Code skill that teaches Claude to use this tool
+while it edits diagrams: it registers every `*.d2` file it touches with the
+shared server, hands you a preview URL, and then leaves the preview alone —
+the file watcher does the refreshing. It also stops Claude from the two obvious
+mistakes: calling `d2-live` in the foreground (which blocks, because the first
+invocation _is_ the server) and re-running it after every edit (which opens a
+browser tab each time).
+
+Install as a plugin (updates with `git pull` on the marketplace):
+
+```
+/plugin marketplace add pltanton/d2-live
+/plugin install d2-live
+```
+
+Or link it as a personal skill:
+
+```bash
+ln -s "$PWD/skills/d2-live" ~/.claude/skills/d2-live
+```
+
+The skill ships one helper, `skills/d2-live/scripts/d2-live-preview`, which is
+useful on its own — it reuses a healthy server, starts a detached one if there
+is none, registers files by absolute path, and prints the preview URL without
+ever blocking:
+
+```bash
+skills/d2-live/scripts/d2-live-preview ./docs/diagrams
+```
+
 ## Development
 
 ```bash
