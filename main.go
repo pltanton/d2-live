@@ -46,7 +46,7 @@ type fileMeta struct {
 type fileEntry struct {
 	abs  string
 	base string
-	subs map[chan struct{}]struct{}
+	subs map[chan string]struct{}
 }
 
 type server struct {
@@ -60,6 +60,11 @@ type server struct {
 	cache       map[string]string
 	watchedDirs map[string]int
 	debounce    map[string]*time.Timer
+	seen        map[string]string
+	lastGood    map[string]string
+
+	// writeMu serialises PUT /source so the stale check and the write are atomic.
+	writeMu sync.Mutex
 
 	subMu     sync.Mutex
 	total     int
@@ -1187,6 +1192,9 @@ func (s *server) start(ln net.Listener) error {
 	mux.HandleFunc("/png", s.handlePNG)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/files", s.handleFiles)
+	mux.HandleFunc("/source", s.handleSource)
+	mux.HandleFunc("/edit", handleEdit)
+	mux.HandleFunc("/model", handleModel)
 
 	return (&http.Server{Handler: mux}).Serve(ln)
 }
@@ -1387,6 +1395,8 @@ func newServer(layout string, idle time.Duration) *server {
 		cache:       map[string]string{},
 		watchedDirs: map[string]int{},
 		debounce:    map[string]*time.Timer{},
+		seen:        map[string]string{},
+		lastGood:    map[string]string{},
 		idleSince:   time.Now(),
 	}
 }
@@ -1401,7 +1411,7 @@ func (s *server) register(abs string) {
 	if _, ok := s.files[abs]; ok {
 		return
 	}
-	s.files[abs] = &fileEntry{abs: abs, base: filepath.Base(abs), subs: map[chan struct{}]struct{}{}}
+	s.files[abs] = &fileEntry{abs: abs, base: filepath.Base(abs), subs: map[chan string]struct{}{}}
 	dir := filepath.Dir(abs)
 	if s.watchedDirs[dir] == 0 {
 		if err := s.watcher.Add(dir); err != nil {
@@ -1426,6 +1436,7 @@ func (s *server) unregister(abs string) bool {
 		return false
 	}
 	delete(s.files, abs)
+	delete(s.seen, abs)
 
 	if timer := s.debounce[abs]; timer != nil {
 		timer.Stop()
@@ -1436,6 +1447,11 @@ func (s *server) unregister(abs string) bool {
 	for key := range s.cache {
 		if strings.HasPrefix(key, prefix) {
 			delete(s.cache, key)
+		}
+	}
+	for key := range s.lastGood {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.lastGood, key)
 		}
 	}
 
@@ -1455,7 +1471,7 @@ func (s *server) unregister(abs string) bool {
 	s.subMu.Lock()
 	for ch := range entry.subs {
 		select {
-		case ch <- struct{}{}:
+		case ch <- "reload":
 		default:
 		}
 	}
@@ -1495,6 +1511,7 @@ func (s *server) getSVG(file string, sketch bool, layout string) (string, error)
 	}
 	s.mu.Lock()
 	s.cache[key] = svg
+	s.lastGood[key] = svg
 	s.mu.Unlock()
 	return svg, nil
 }
@@ -1560,12 +1577,15 @@ func (s *server) scheduleRerender(abs string) {
 			return
 		}
 		s.invalidate(abs)
-		s.notify(abs)
+		s.notify(abs, "reload")
+		if b, err := os.ReadFile(abs); err == nil && s.sourceChanged(abs, contentHash(b)) {
+			s.notify(abs, "source")
+		}
 	})
 	s.mu.Unlock()
 }
 
-func (s *server) notify(abs string) {
+func (s *server) notify(abs, kind string) {
 	s.mu.Lock()
 	entry := s.files[abs]
 	s.mu.Unlock()
@@ -1575,14 +1595,14 @@ func (s *server) notify(abs string) {
 	s.subMu.Lock()
 	for ch := range entry.subs {
 		select {
-		case ch <- struct{}{}:
+		case ch <- kind:
 		default:
 		}
 	}
 	s.subMu.Unlock()
 }
 
-func (s *server) subscribe(abs string, ch chan struct{}) bool {
+func (s *server) subscribe(abs string, ch chan string) bool {
 	s.mu.Lock()
 	entry := s.files[abs]
 	s.mu.Unlock()
@@ -1596,7 +1616,7 @@ func (s *server) subscribe(abs string, ch chan struct{}) bool {
 	return true
 }
 
-func (s *server) unsubscribe(abs string, ch chan struct{}) {
+func (s *server) unsubscribe(abs string, ch chan string) {
 	s.mu.Lock()
 	entry := s.files[abs]
 	s.mu.Unlock()
@@ -1645,7 +1665,8 @@ func renderSVG(file, layout string, sketch bool) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return errorSVG(fmt.Sprintf("d2 render failed: %s", strings.TrimSpace(stderr.String()))), err
+		msg := strings.TrimSpace(stderr.String())
+		return errorSVG("d2 render failed: " + msg), fmt.Errorf("%v: %s", err, msg)
 	}
 	return string(sanitizeSVG(stdout.Bytes())), nil
 }
@@ -1806,7 +1827,18 @@ func (s *server) handleSVG(w http.ResponseWriter, r *http.Request) {
 	if layout == "" {
 		layout = s.layout
 	}
-	svg, _ := s.getSVG(file, q.Get("sketch") == "true", layout)
+	sketch := q.Get("sketch") == "true"
+	svg, err := s.getSVG(file, sketch, layout)
+	if err != nil && q.Get("edit") == "1" {
+		// The editor shows the error next to the code; keep the diagram in place.
+		s.mu.Lock()
+		good, ok := s.lastGood[cacheKey(file, sketch, layout)]
+		s.mu.Unlock()
+		if ok {
+			svg = good
+		}
+		w.Header().Set("X-D2-Error", strings.ReplaceAll(err.Error(), "\n", " "))
+	}
 	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
 	_, _ = w.Write([]byte(svg))
 }
@@ -1857,7 +1889,7 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		s.register(file)
 	}
 
-	ch := make(chan struct{}, 1)
+	ch := make(chan string, 4)
 	if !s.subscribe(file, ch) {
 		http.Error(w, "unknown file", http.StatusNotFound)
 		return
@@ -1875,8 +1907,17 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ch:
-			_, _ = io.WriteString(w, "data: reload\n\n")
+		case kind := <-ch:
+			if kind == "source" {
+				text, err := readText(file)
+				if err != nil {
+					continue
+				}
+				payload, _ := json.Marshal(map[string]string{"text": text, "hash": contentHash([]byte(text))})
+				fmt.Fprintf(w, "event: source\ndata: %s\n\n", payload)
+			} else {
+				_, _ = io.WriteString(w, "data: reload\n\n")
+			}
 			flusher.Flush()
 		}
 	}
