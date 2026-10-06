@@ -316,6 +316,20 @@ body.editing #grid {
 #viewer.moving #scene {
   will-change: transform;
 }
+#snapshot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+#viewer.moving #snapshot.ready {
+  opacity: 1;
+}
+#viewer.moving #snapshot.ready ~ svg {
+  visibility: hidden;
+}
 /* d2 paints its own white backdrop as the first rect; the canvas replaces it on
    screen only, exports still carry it. */
 #scene .d2-svg > rect:first-child {

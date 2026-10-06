@@ -5,19 +5,16 @@ function el(tag, cls, attrs = {}) {
   return e;
 }
 
-export function createOverlay(viewer, panzoom, h) {
+export function createOverlay(viewer, panzoom) {
   const root = el('div', '', {id: 'd2l-overlay'});
   const hoverBox = el('div', 'd2l-box d2l-hover');
   const selBox = el('div', 'd2l-box d2l-sel');
   const mini = el('div', 'd2l-mini');
-  const handle = el('button', 'd2l-handle', {type: 'button', title: 'Click: new state after this one · drag onto a state: connect'});
-  handle.textContent = '+';
-  handle.addEventListener('pointerdown', (e) => h.onHandleDown(e));
   const band = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   band.setAttribute('class', 'd2l-band');
   const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
   band.appendChild(line);
-  root.append(hoverBox, selBox, band, mini, handle);
+  root.append(hoverBox, selBox, band, mini);
   viewer.appendChild(root);
   // panzoom listens on the viewer; presses on our controls must not start a pan.
   for (const type of ['mousedown', 'touchstart', 'dblclick']) {
@@ -81,7 +78,6 @@ export function createOverlay(viewer, panzoom, h) {
     if (!current || !current.g.isConnected) {
       selBox.style.display = 'none';
       mini.style.display = 'none';
-      handle.style.display = 'none';
       return;
     }
     mini.style.display = 'flex';
@@ -102,12 +98,6 @@ export function createOverlay(viewer, panzoom, h) {
     else selBox.style.display = 'none';
     const top = r.y - (isObject ? 8 : 0) - current.miniH - 10;
     mini.style.translate = `${Math.round(r.x + r.w / 2 - current.miniW / 2)}px ${Math.round(Math.max(8, top))}px`;
-    if (isObject) {
-      if (handle.style.display !== 'grid') handle.style.display = 'grid';
-      handle.style.translate = `${Math.round(r.x + r.w - 4)}px ${Math.round(r.y + r.h - 4)}px`;
-    } else {
-      handle.style.display = 'none';
-    }
   }
 
   function schedule() {

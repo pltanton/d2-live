@@ -6,6 +6,7 @@ import { undo, redo, undoDepth, redoDepth } from './vendor/codemirror.js';
 const AUTOSAVE_MS = 300;
 const MODEL_MS = 120;
 const PANEL_KEY = 'd2-live:panel-width';
+const INSPECTOR_KEY = 'd2-live:inspector-collapsed';
 const RENDER_TIMEOUT_MS = 10000;
 
 let api = null;
@@ -75,7 +76,12 @@ function build() {
     h('button', {type: 'button', onclick: keepMine}, 'Keep mine'));
   const code = h('div', {class: 'd2l-code'});
   const error = h('div', {class: 'd2l-error', hidden: ''});
-  const inspector = h('section', {class: 'd2l-inspector'});
+  const inspector = h('div', {class: 'd2l-inspector'});
+  const toggle = h('button', {type: 'button', class: 'd2l-ins-toggle', title: 'Collapse / expand'});
+  const inspectorBox = h('section', {class: 'd2l-ins'},
+    h('header', {class: 'd2l-ins-head', onclick: () => setInspectorCollapsed(!inspectorBox.classList.contains('collapsed'))},
+      h('span', {}, 'Inspector'), toggle),
+    inspector);
   const resizer = h('div', {class: 'd2l-resizer', title: 'Drag to resize'});
   const panel = h('aside', {id: 'd2l-panel'},
     resizer,
@@ -83,7 +89,7 @@ function build() {
       h('span', {class: 'd2l-head-title'}, 'Code'),
       status,
       h('button', {type: 'button', class: 'd2l-close', title: 'Leave edit mode (E)', onclick: () => api.setEditing(false)}, '✕')),
-    banner, code, error, inspector);
+    banner, code, error, inspectorBox);
   const undoBtn = h('button', {type: 'button', title: 'Undo (⌘Z)', class: 'd2l-icon', onclick: () => history(undo)}, '↶');
   const redoBtn = h('button', {type: 'button', title: 'Redo (⇧⌘Z)', class: 'd2l-icon', onclick: () => history(redo)}, '↷');
   const toolbar = h('div', {id: 'd2l-toolbar'},
@@ -92,16 +98,21 @@ function build() {
   const hint = h('div', {id: 'd2l-hint', hidden: ''});
   const rendering = h('div', {id: 'd2l-rendering', hidden: ''}, h('span', {class: 'd2l-spinner'}), 'Rendering…');
   document.body.append(panel, toolbar, hint, rendering);
-  ui = {panel, status, banner, code, error, inspector, toolbar, undoBtn, redoBtn, hint, rendering};
+  ui = {panel, status, banner, code, error, inspector, inspectorBox, toggle, toolbar, undoBtn, redoBtn, hint, rendering};
 
   try {
     const w = parseInt(localStorage.getItem(PANEL_KEY), 10);
     if (w) document.documentElement.style.setProperty('--d2l-panel-w', w + 'px');
   } catch (err) { /* storage unavailable */ }
   resizer.addEventListener('pointerdown', startResize);
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(INSPECTOR_KEY) === '1';
+  } catch (err) { /* storage unavailable */ }
+  setInspectorCollapsed(collapsed);
 
   ed = createEditor(code, {onDocChange, onCursor});
-  overlay = createOverlay(api.viewer, api.panzoom, {onHandleDown});
+  overlay = createOverlay(api.viewer, api.panzoom);
 
   api.panzoom.on('transform', () => {
     closeClassMenu();
@@ -121,6 +132,14 @@ function build() {
     const hit = hitTest(e.target);
     overlay.hover(hit && hit.g, hit && hit.kind);
   });
+}
+
+function setInspectorCollapsed(on) {
+  ui.inspectorBox.classList.toggle('collapsed', on);
+  ui.toggle.textContent = on ? '▸' : '▾';
+  try {
+    localStorage.setItem(INSPECTOR_KEY, on ? '1' : '0');
+  } catch (err) { /* storage unavailable */ }
 }
 
 function startResize(e) {
@@ -586,6 +605,7 @@ async function connect(src, dst) {
 }
 
 function focusId() {
+  setInspectorCollapsed(false);
   requestAnimationFrame(() => {
     const f = ui.inspector.querySelector('[data-focus="id"]');
     if (f) {
@@ -604,63 +624,37 @@ function removeSelected() {
 
 function toggleConnect() {
   if (st.connect) cancelConnect();
-  else startConnect(false);
+  else startConnect();
 }
 
-function startConnect(drag, e) {
+function startConnect() {
   if (!st.sel || st.sel.kind !== 'object') {
     api.showToast('select a state first');
     return;
   }
-  st.connect = {src: st.sel.id, drag, x: e ? e.clientX : 0, y: e ? e.clientY : 0, moved: false};
+  st.connect = {src: st.sel.id};
   api.viewer.classList.add('d2l-connecting');
   ui.hint.hidden = false;
-  ui.hint.textContent = drag
-    ? 'Drop on a state to connect · on empty canvas for a new one'
-    : `From ${st.sel.id}: click a state to connect · empty canvas for a new state · Esc to cancel`;
-  if (e) overlay.bandFrom(st.gById.get(st.sel.id), e.clientX, e.clientY);
+  ui.hint.textContent = `From ${st.sel.id}: click a state to connect · empty canvas for a new state · Esc to cancel`;
 }
 
 function cancelConnect() {
   st.connect = null;
   if (api) api.viewer.classList.remove('d2l-connecting');
   if (overlay) overlay.bandFrom(null);
-  if (ui) {
-    ui.hint.hidden = true;
-  }
+  if (ui) ui.hint.hidden = true;
 }
 
 function onPointerMove(e) {
   if (!st.connect) return;
-  if (Math.hypot(e.clientX - st.connect.x, e.clientY - st.connect.y) > 6) st.connect.moved = true;
   overlay.bandFrom(st.gById.get(st.connect.src), e.clientX, e.clientY);
-}
-
-function onHandleDown(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  startConnect(true, e);
-  const up = (ev) => {
-    window.removeEventListener('pointerup', up, true);
-    const c = st.connect;
-    cancelConnect();
-    if (!c) return;
-    if (!c.moved) {
-      createFrom(c.src);
-      return;
-    }
-    const hit = hitTest(document.elementFromPoint(ev.clientX, ev.clientY));
-    if (hit && hit.kind === 'object') connect(c.src, hit.id);
-    else createFrom(c.src);
-  };
-  window.addEventListener('pointerup', up, true);
 }
 
 function onSceneClick(e) {
   if (!st.active) return;
   if (st.down && Math.hypot(e.clientX - st.down.x, e.clientY - st.down.y) > 4) return;
   const hit = hitTest(e.target);
-  if (st.connect && !st.connect.drag) {
+  if (st.connect) {
     const src = st.connect.src;
     cancelConnect();
     if (hit && hit.kind === 'object') connect(src, hit.id);

@@ -264,6 +264,28 @@ copyPngButton.addEventListener('click', copyPng);
 downloadSvgButton.addEventListener('click', downloadSvg);
 downloadPngButton.addEventListener('click', downloadPng);
 
+let snapshotURL = null;
+
+// While the view moves, a decoded <img> of the same SVG stands in for the live
+// DOM: browsers move a raster cheaply, while the inline SVG (masks on every edge
+// label, embedded fonts) is repainted per frame — the drag lag seen in Firefox.
+function prepareSnapshot(svg) {
+  const backdropOff = '<style>.d2-svg > rect:first-child{display:none}</style>';
+  const markup = svg.replace(/(<svg[^>]*>)/, '$1' + backdropOff);
+  const url = URL.createObjectURL(new Blob([markup], {type: 'image/svg+xml'}));
+  const img = new Image();
+  img.id = 'snapshot';
+  img.alt = '';
+  img.src = url;
+  img.decode().then(() => {
+    if (!img.isConnected) return;
+    img.classList.add('ready');
+  }).catch(() => {});
+  scene.prepend(img);
+  if (snapshotURL) URL.revokeObjectURL(snapshotURL);
+  snapshotURL = url;
+}
+
 let svgRequested = 0;
 let svgShown = 0;
 
@@ -277,6 +299,7 @@ async function reloadSvg() {
     }
     svgShown = seq;
     scene.innerHTML = svg;
+    prepareSnapshot(svg);
     document.dispatchEvent(new CustomEvent('d2l:svg', {detail: {error: response.headers.get('X-D2-Error'), hash: response.headers.get('X-D2-Hash')}}));
   } catch (err) {
     showToast('update failed');
@@ -412,6 +435,7 @@ window.d2live = {
   state, viewer, scene, panzoom: instance, showToast, reloadSvg, setEditing, typingTarget,
 };
 
+prepareSnapshot(scene.innerHTML);
 setConnected('connecting');
 saveState();
 connect();

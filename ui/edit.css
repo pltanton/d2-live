@@ -119,19 +119,49 @@ body.editing #viewer {
 .d2l-error[hidden] {
   display: none;
 }
-.d2l-inspector {
-  flex: 0 1 auto;
-  max-height: 52%;
-  overflow: auto;
-  padding: 14px 16px 18px;
+.d2l-ins {
+  flex: 0 0 auto;
+  max-height: calc(100% - 200px);
+  display: flex;
+  flex-direction: column;
   border-top: 1px solid var(--surface-2);
+}
+.d2l-ins-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 8px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.d2l-ins-head:hover {
+  color: var(--text);
+}
+.d2l-ins-toggle {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.d2l-ins.collapsed .d2l-inspector {
+  display: none;
+}
+.d2l-inspector {
+  overflow: auto;
+  padding: 2px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   font-size: 12px;
-}
-.d2l-inspector:empty {
-  display: none;
 }
 
 /* code decorations */
@@ -521,30 +551,6 @@ body.editing #viewer {
 }
 .d2l-menu button.d2l-current {
   color: var(--primary);
-}
-.d2l-handle {
-  position: absolute;
-  left: 0;
-  top: 0;
-  display: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--d2l-accent);
-  color: #fff;
-  font: 700 15px/1 system-ui, sans-serif;
-  box-shadow: 0 2px 8px rgba(60, 40, 120, 0.35);
-  cursor: crosshair;
-  pointer-events: auto;
-  opacity: 0.85;
-  transition: scale 160ms var(--spring), opacity 140ms var(--emph);
-}
-.d2l-handle:hover {
-  opacity: 1;
-  scale: 1.18;
 }
 .d2l-band {
   position: absolute;
