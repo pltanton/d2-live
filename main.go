@@ -81,7 +81,7 @@ var uiFS embed.FS
 
 var pageTemplate = template.Must(template.ParseFS(uiFS, "ui/index.html"))
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	var layout string
