@@ -1,0 +1,16 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "esbuild entry.js --bundle --minify --format=esm --legal-comments=none --outfile=../../ui/vendor/codemirror.js"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.18.0",
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.0",
+    "@lezer/highlight": "^1.2.0",
+    "esbuild": "^0.25.0"
+  }
+}

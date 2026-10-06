@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.PageTitle}}</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+  <div id="hud" class="connecting">
+    <div id="pill">
+      <span class="dot"></span>
+      <span class="fname" id="fname">{{.Base}}</span>
+    </div>
+    <div id="panel">
+      <div class="head">
+        <div class="row1"><span class="dot"></span><span id="title">{{.Base}}</span></div>
+        <div class="sub">Live preview</div>
+      </div>
+      <div id="controls">
+        <label class="ctl"><span class="lbl">File</span><select id="file-select">{{range .Files}}<option value="{{.Abs}}"{{if eq .Abs $.File}} selected{{end}}>{{.Base}}</option>{{end}}</select></label>
+        <label class="ctl"><span class="lbl">Layout</span><select id="layout-select">{{range .Layouts}}<option value="{{.}}"{{if eq . $.Layout}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+        <label class="ctl"><span class="lbl">Sketch</span><span class="switch"><input type="checkbox" id="sketch-toggle"{{if .Sketch}} checked{{end}}><span class="track"></span><span class="thumb"></span></span></label>
+      </div>
+      <div id="actions">
+        <button id="copy-svg" class="primary" type="button">
+          <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 2.75A1.75 1.75 0 0 1 4.75 1h4.5A1.75 1.75 0 0 1 11 2.75V4h-1.5V2.75a.25.25 0 0 0-.25-.25h-4.5a.25.25 0 0 0-.25.25V4H3z"/>
+            <path d="M5.75 5A1.75 1.75 0 0 0 4 6.75v6.5A1.75 1.75 0 0 0 5.75 15h6.5A1.75 1.75 0 0 0 14 13.25v-6.5A1.75 1.75 0 0 0 12.25 5zm0 1.5h6.5a.25.25 0 0 1 .25.25v6.5a.25.25 0 0 1-.25.25h-6.5a.25.25 0 0 1-.25-.25v-6.5a.25.25 0 0 1 .25-.25"/>
+          </svg>
+          <span>Copy SVG</span>
+        </button>
+        <button id="copy-png" type="button">
+          <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3 2.75A1.75 1.75 0 0 1 4.75 1h4.5A1.75 1.75 0 0 1 11 2.75V4h-1.5V2.75a.25.25 0 0 0-.25-.25h-4.5a.25.25 0 0 0-.25.25V4H3z"/>
+            <path d="M5.75 5A1.75 1.75 0 0 0 4 6.75v6.5A1.75 1.75 0 0 0 5.75 15h6.5A1.75 1.75 0 0 0 14 13.25v-6.5A1.75 1.75 0 0 0 12.25 5zm0 1.5h6.5a.25.25 0 0 1 .25.25v6.5a.25.25 0 0 1-.25.25h-6.5a.25.25 0 0 1-.25-.25v-6.5a.25.25 0 0 1 .25-.25"/>
+          </svg>
+          <span>Copy PNG</span>
+        </button>
+        <button id="download-svg" type="button">
+          <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 1.75a.75.75 0 0 1 .75.75v6.69l1.22-1.22a.75.75 0 1 1 1.06 1.06l-2.5 2.5a.75.75 0 0 1-1.06 0l-2.5-2.5a.75.75 0 1 1 1.06-1.06L7.25 9.19V2.5A.75.75 0 0 1 8 1.75"/>
+            <path d="M3.75 13a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75"/>
+          </svg>
+          <span>Download SVG</span>
+        </button>
+        <button id="download-png" type="button">
+          <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 1.75a.75.75 0 0 1 .75.75v6.69l1.22-1.22a.75.75 0 1 1 1.06 1.06l-2.5 2.5a.75.75 0 0 1-1.06 0l-2.5-2.5a.75.75 0 1 1 1.06-1.06L7.25 9.19V2.5A.75.75 0 0 1 8 1.75"/>
+            <path d="M3.75 13a.75.75 0 0 1 .75-.75h7a.75.75 0 0 1 0 1.5h-7a.75.75 0 0 1-.75-.75"/>
+          </svg>
+          <span>Download PNG</span>
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="viewer">
+    <div id="scene">{{.SVG}}</div>
+    <div id="png-loader" aria-hidden="true">
+      <div class="card">
+        <div class="spinner"></div>
+        <div>Rendering PNG…</div>
+      </div>
+    </div>
+  </div>
+  <div id="toast" aria-live="polite"></div>
+  <script src="https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js"></script>
+  <script>window.D2LIVE_BOOT = {file: {{.File}}, sketch: {{.Sketch}}, layout: {{.Layout}}};</script>
+  <script src="/ui/app.js"></script>
+
+</body>
+</html>
