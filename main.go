@@ -27,7 +27,7 @@ import (
 	"syscall"
 	"time"
 
-	"d2-live/internal/elklayout"
+	"github.com/pltanton/d2-live/internal/elklayout"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -83,7 +83,7 @@ var uiFS embed.FS
 
 var pageTemplate = template.Must(template.ParseFS(uiFS, "ui/index.html"))
 
-const version = "0.3.0"
+const version = "0.3.1"
 
 func main() {
 	var layout string

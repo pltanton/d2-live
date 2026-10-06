@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"d2-live/internal/elklayout"
+	"github.com/pltanton/d2-live/internal/elklayout"
 	"oss.terrastruct.com/d2/d2graph"
 	"oss.terrastruct.com/d2/d2layouts/d2dagrelayout"
 	"oss.terrastruct.com/d2/d2lib"

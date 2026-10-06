@@ -1,7 +1,7 @@
 {buildGoModule}:
 buildGoModule {
   pname = "d2-live";
-  version = "0.3.0";
+  version = "0.3.1";
   src = ./.;
   vendorHash = "sha256-ujQhLKtMwKBY+ZHFPpjX9d5HclKgQs95W0CGZJnQjxA=";
   doCheck = false;

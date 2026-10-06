@@ -1,4 +1,4 @@
-module d2-live
+module github.com/pltanton/d2-live
 
 go 1.25
 

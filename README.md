@@ -13,6 +13,33 @@ What it does:
 - editor integration over LSP (no keybindings or custom glue needed)
 - edit mode: change states and transitions on the diagram, with the code alongside
 
+## Install
+
+With Nix:
+
+```bash
+nix profile install github:pltanton/d2-live   # update: nix profile upgrade d2-live · remove: nix profile remove d2-live
+```
+
+On NixOS or home-manager, add the flake as an input and the package to your packages:
+
+```nix
+inputs.d2-live.url = "github:pltanton/d2-live";
+# …
+environment.systemPackages = [ inputs.d2-live.packages.${pkgs.system}.default ];
+```
+
+Anywhere else, with Go 1.25 or newer:
+
+```bash
+go install github.com/pltanton/d2-live@latest   # the same command updates it
+rm "$(go env GOPATH)/bin/d2-live"               # removes it
+```
+
+Preview and edit mode render in-process and need nothing else. The `d2` CLI is
+only used for PNG export and the `tala` layout engine; install it from
+[d2lang.com](https://d2lang.com/tour/install) if you want those.
+
 ## Run
 
 ```bash
