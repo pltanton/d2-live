@@ -45,7 +45,8 @@ editing, dark theme of the canvas.
 ```
 
 Structural edits run on the server against the real D2 AST
-(`oss.terrastruct.com/d2`: `d2compiler`, `d2ast`, `d2oracle`, `d2format`).
+(`oss.terrastruct.com/d2`: `d2compiler`, `d2graph`, `d2ast`), applied as byte
+splices of the original text (see below).
 Alternatives rejected: D2 compiled to WASM in the browser (megabytes per tab, the
 server already exists); a hand-written JS parser for an FSM subset (breaks on the
 first nested map or block string). Cost of the chosen route: the binary grows
@@ -74,8 +75,8 @@ Compiles the current file text and returns:
   "hash": "sha256 of the text",
   "objects": [{"id": "DECISION_APPROVED", "label": "…", "labelIsMarkdown": false,
                "class": "active", "shape": "rectangle", "style": {"fill": "…"},
-               "decl": {"start": [40,0], "end": [40,35]},
-               "refs": [{"start": [62,25], "end": [62,42]}],
+               "decl": {"from": 1290, "to": 1325},
+               "refs": [{"from": 2210, "to": 2227}],
                "comment": {"text": "…", "range": {…}} }],
   "edges":   [{"id": "(A -> B)[0]", "src": "A", "dst": "B", "label": "…",
                "class": "evt", "decl": {…}, "comment": {…}}],
@@ -84,7 +85,8 @@ Compiles the current file text and returns:
 }
 ```
 
-Ranges are 0-based `[line, col]` taken from AST ranges. `decl` is the reference
+Ranges are UTF-16 offsets into the text (what CodeMirror uses), converted from
+the AST's byte ranges. `decl` is the reference
 that carries the declaration's map/label (the first one if several); `refs` are
 the other mentions. `comment` is the run of consecutive `#` lines directly above
 `decl` (no blank line in between), or null. On a compile error the response
@@ -93,7 +95,7 @@ client.
 
 ### `POST /edit`
 
-Request: `{"file": "…", "baseHash": "…", "op": {…}}`. The server reads the file;
+Request: `{"file": "…", "baseHash": "…", "op": {"kind": "rename", …}}`. The server reads the file;
 if its hash differs from `baseHash` it answers `409 {"reason": "stale", "text":
 current}`. Otherwise it applies the op and answers `200 {"text": new, "select":
 id}`. The server does **not** write the file — the client applies the new text
@@ -103,26 +105,32 @@ autosave writes it. Op failures (rename onto an existing id, unknown id) answer
 
 Ops:
 
-| op                                             | implementation                                                                                           |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `rename {id, to}`                              | `d2oracle.Rename` — follows every reference                                                              |
-| `createNode {id?, class?, afterId?}`           | `d2oracle.Create`, then move the new AST node (see Placement); unique name `NEW_STATE`, `NEW_STATE_2`, … |
-| `createEdge {src, dst, label?, class?}`        | `d2oracle.Create("src -> dst")`, then set props, then Placement                                          |
-| `createNodeWithEdge {src, class?, edgeClass?}` | the two above as one op = one undo step                                                                  |
-| `delete {id}`                                  | `d2oracle.Delete` (node takes its edges); then collapse the blank line it leaves                         |
-| `reverse {edgeId}`                             | `d2oracle.ReconnectEdge` with src/dst swapped                                                            |
-| `set {id, key, value}`                         | own in-place setter, see below; `value: null` removes the key                                            |
-| `setComment {id, text}`                        | own: replace/insert/remove the `#` run above `decl`                                                      |
+| op | effect |
+|---|---|
+| `rename {id, to}` | every reference of the object (declaration, edge ends) |
+| `createNode {class?}` | new `NEW_STATE` / `NEW_STATE_2` / …, see Placement |
+| `createEdge {src, dst, label?, class?}` | new edge line, see Placement |
+| `createNodeWithEdge {src, class?, edgeClass?}` | both, one response = one undo step |
+| `delete {id}` | object: its declaration lines, every edge touching it, their comment runs; edge: its line and comment run |
+| `reverse {id}` | swap the src/dst text of the edge declaration |
+| `set {id, key, value}` | in-place property setter; `value: null` removes the key |
+| `setComment {id, text}` | replace/insert/remove the `#` run above `decl` |
 
 `id` addresses objects (`STATE`), edges (`(A -> B)[0]`) and classes
 (`classes.pause`). `key` is one of `label`, `class`, `shape`, `style.<prop>`
 with prop in `fill, stroke, stroke-width, stroke-dash, border-radius,
 font-color`.
 
-#### Why an own setter
+#### Text splicing instead of `d2oracle` + `d2format`
 
-Probing `d2oracle.Set` (d2 v0.7.1 and master `716f6185da68`) on
-`withdraw-fsm.d2`:
+Every op is a list of byte-range replacements on the original text, computed
+from the compiled graph's AST ranges (`d2graph.Object.References`,
+`d2graph.Edge.References`, `d2ast` node ranges). The result is compiled; if it
+does not compile, or the op's postcondition fails (e.g. the renamed id is not in
+the new graph), the op answers 422 and the file is untouched.
+
+Why not `d2oracle` (probed on `withdraw-fsm.d2`, d2 v0.7.1 and master
+`716f6185da68`):
 
 - `Set("(A -> B)[0].class", "evt")` on `A -> B: "…" {class: sync}` appends a
   second `class: evt` instead of replacing.
@@ -130,37 +138,45 @@ Probing `d2oracle.Set` (d2 v0.7.1 and master `716f6185da68`) on
   `classes.pause.style.fill: …` line at the end of the file instead of editing
   the `classes:` block.
 - `Set("title.label", …)` turns a `|md … |` block string into a quoted string.
+- Any oracle op goes through `d2format`, which rewrites unrelated lines
+  (`A -> B {class: x}` → `A -> B: {class: x}`), and d2format derives blank lines
+  and inline-vs-block maps from node ranges, which new nodes do not have.
 
-The setter works on the AST directly:
+Splicing changes only the bytes the op is about. Constructs outside the FSM
+subset — edge chains (`a -> b -> c`), globs, imports, nested containers,
+`(A -> B)[0].x` references to an edge outside its declaration — make the op
+answer 422 "edit this by hand"; they stay editable in the code editor.
 
-1. Find the target map: the `decl` map of the object/edge, or for a class the
-   `classes: {name: {…}}` map. If the declaration has no map, create an inline
-   one on `decl` (`X` → `X: {class: pause}`).
+#### Setter
+
+1. Target map: the map value of `decl` (object/edge), or for a class the
+   `classes: {name: {…}}` map.
 2. Walk the dotted key (`style.fill`) inside that map, accepting both nested
-   form (`style: {fill: …}`) and dotted form (`style.fill: …`). If found, replace
-   the value node in place. If not, add it to the deepest existing map on the
-   path (`style: {…}` gets `fill: …`; no `style` map → `style.fill: …`).
-3. Label: replace the key's primary value. If the old value is a block string
-   (`|md`), keep it a block string with the same tag and only swap the body.
-4. Values are written as unquoted/quoted/block per `d2ast` rules (quote when the
-   value has spaces or special characters; newlines in a markdown label stay a
-   block string, in a plain label become `\n` escapes in a double-quoted string).
-5. `value: null` removes the key; an emptied `style: {}` / `{}` is removed too.
-6. Compile the result; if it no longer compiles, return 422 and keep the file.
-
-The file is formatted with `d2format.Format(ast)`. On the reference files a
-format-only round-trip changes exactly one cosmetic thing — `A -> B {class: x}`
-becomes `A -> B: {class: x}` — which is accepted.
+   (`style: {fill: …}`) and dotted (`style.fill: …`) forms. Found → replace the
+   value's byte range. Not found → insert into the deepest existing map on the
+   path: into an inline map as `; key: value` before its `}`, into a block map
+   as a new line at the map's indentation + 2 before its closing `}` line. No
+   map on `decl` at all → append ` {key: value}` after the decl key's
+   label/primary.
+3. Label: for objects/edges the label is the key's primary value
+   (`X: "label" {…}`) or the value itself (`X: label`). A block string keeps its
+   quote and tag and only swaps the body, re-indented to the key's indentation
+   + 2. An object with no label gets `X: "label"` inserted after the key.
+4. Values are written unquoted when they match `^[A-Za-z0-9_#.\-]+$` and are
+   not a D2 keyword, otherwise double-quoted with `\"`, `\\` and `\n`
+   escapes. A markdown label (old value is `|md`) stays a block string.
+5. `value: null` removes the key (and the `; ` / line around it); an emptied
+   `style: {}` and an emptied `{}` on the declaration go too.
 
 #### Placement
 
-`d2oracle.Create` appends at the end of the file. After creating, the new AST
-node is moved:
-
-- a node goes right after the last top-level object declaration (a key with no
-  edges that is not `classes`, `title`, `notes`, `direction`, `vars`);
-- an edge goes right after the last edge whose source is the same object, or,
-  if none, after the last top-level edge.
+- New node: a new line right after the last top-level object declaration (a key
+  without edges that is not `classes`, `title`, `notes`, `direction`, `vars`,
+  `style`); written as `NAME: {class: X}` or `NAME`.
+- New edge: a new line right after the last edge declaration whose source is
+  the same object; if none, after the last top-level edge declaration; if the
+  file has no edges, after the last object declaration. Written as
+  `SRC -> DST: "label" {class: X}`, parts omitted when empty.
 
 ### `PUT /source`
 
