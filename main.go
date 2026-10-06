@@ -34,6 +34,9 @@ import (
 //go:embed assets/favicon.png
 var faviconPNG []byte
 
+//go:embed assets/favicon.svg
+var faviconSVG []byte
+
 const debounceDelay = 150 * time.Millisecond
 
 // layouts offered in the UI layout selector.
@@ -433,6 +436,10 @@ func (s *server) start(ln net.Listener) error {
 	mux.HandleFunc("/close", s.handleClose)
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/favicon.png", handleFavicon)
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write(faviconSVG)
+	})
 	mux.Handle("/ui/", noCache(http.FileServer(http.FS(uiFS))))
 	mux.HandleFunc("/svg", s.handleSVG)
 	mux.HandleFunc("/png", s.handlePNG)
