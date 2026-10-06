@@ -305,8 +305,9 @@ error is a red line decoration on its line plus the message under the editor.
   `classes:` block, markdown label stays `|md`, remove a key and empty maps,
   setComment insert/replace/remove, delete (node with edges, no leftover blank
   line), reverse.
-- `/source`: atomic write, 409 on stale hash, 403 on unregistered path, own
-  write not echoed as `source`, an external write is.
+- `/source`: atomic write, 409 on stale hash, 403 on unregistered path; an
+  external write produces a `source` event (the client ignores events whose hash
+  it just wrote).
 - `/model`: ids, ranges and comments on the reference file; error payload on a
   broken file.
 - `scripts/itest.py`: an HTTP scenario — open, edit via `/edit` + `PUT
