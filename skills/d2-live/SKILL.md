@@ -41,8 +41,9 @@ description: Use when writing, editing, generating or debugging D2 diagrams (*.d
 
    Exit 1 prints `file:line:col` errors. This matters: the preview endpoint renders a _card containing the error text_ instead of failing, so a broken diagram still looks like a rendered page. Never report a diagram as done without a clean exit here.
 
-7. **New file later in the session?** Run the helper for that path too — it registers with the same server without opening another tab. Add `--open` if the user wants a tab for it.
-8. **Done with a throwaway diagram?** `d2-live --close scratch.d2` takes it out of the file dropdown without deleting it (deleting it works too — the server prunes files that disappear). Returns immediately and never starts a server.
+7. **Re-read the file before each edit.** The user may have the tab in edit mode, which writes the file as they work; an edit based on a stale read overwrites theirs.
+8. **New file later in the session?** Run the helper for that path too — it registers with the same server without opening another tab. Add `--open` if the user wants a tab for it.
+9. **Done with a throwaway diagram?** `d2-live --close scratch.d2` takes it out of the file dropdown without deleting it (deleting it works too — the server prunes files that disappear). Returns immediately and never starts a server.
 
 ## Quick reference
 

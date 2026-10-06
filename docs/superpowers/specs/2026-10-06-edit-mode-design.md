@@ -1,7 +1,7 @@
 # Edit mode for d2-live — design
 
 Date: 2026-10-06
-Status: approved in brainstorming, pending spec review
+Status: implemented (branch edit-mode)
 
 ## Goal
 
@@ -35,10 +35,10 @@ editing, dark theme of the canvas.
 │ SVG + overlay  ⇄  CodeMirror 6  ⇄  inspector           │
 │     │ click → id        │ typing      │ field → op      │
 └─────┼───────────────────┼─────────────┼─────────────────┘
-      │ GET /model        │ PUT /source │ POST /edit
+      │ POST /model       │ PUT /source │ POST /edit
 ┌ d2-live (Go) ──────────────────────────────────────────┐
-│ /model  compile → objects, edges, classes, ranges      │
-│ /edit   op on AST → new text                           │
+│ /model  buffer → objects, edges, classes, ranges       │
+│ /edit   buffer + op → new text (pure)                  │
 │ /source atomic write, returns new hash                 │
 │ watcher + SSE: as today, plus "source" event           │
 └────────────────────────────────────────────────────────┘
@@ -66,9 +66,9 @@ browser.
 
 ## Server
 
-### `GET /model?file=…`
+### `POST /model`
 
-Compiles the current file text and returns:
+Compiles the posted buffer (the editor's text, saved or not) and returns:
 
 ```json
 {
@@ -95,13 +95,12 @@ client.
 
 ### `POST /edit`
 
-Request: `{"file": "…", "baseHash": "…", "op": {"kind": "rename", …}}`. The server reads the file;
-if its hash differs from `baseHash` it answers `409 {"reason": "stale", "text":
-current}`. Otherwise it applies the op and answers `200 {"text": new, "select":
-id}`. The server does **not** write the file — the client applies the new text
-to the editor (so it becomes an undo step and gets diff decorations) and the
-autosave writes it. Op failures (rename onto an existing id, unknown id) answer
-`422 {"field": "…", "message": "…"}` and change nothing.
+Request: `{"text": buffer, "op": {"kind": "rename", …}}`. A pure function of the
+client's buffer: it never reads or writes the file, so there is no stale-hash
+case. `200 {"text": new, "select": id}`; op failures (rename onto an existing
+id, unknown id, constructs outside the subset) answer `422 {"field", "message"}`.
+The client applies the new text to the editor (one undo step, diff
+decorations) and the autosave writes it.
 
 Ops:
 
@@ -289,7 +288,6 @@ editor scrolls to it. External changes get the same treatment.
 - SSE `source` while dirty, or a 409 on save → a banner "Changed on disk —
   Take theirs / Keep mine". "Keep mine" re-saves with the new base hash; "Take
   theirs" applies their text.
-- `/edit` 409 stale → apply the returned text, then re-send the op once.
 - Network/write failure → toast; the buffer stays dirty and retries on the next
   change.
 

@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 BIN = sys.argv[1]
@@ -112,6 +114,43 @@ try:
     ) as r:
         page = r.read().decode()
     check("stale link falls back", other in page and "vanished.d2" not in page)
+
+    # 6. Edit mode: an op on the buffer, an atomic save, and a live source event for
+    #    an external write.
+    base = "http://127.0.0.1:%d" % p
+
+    def call(method, path, body):
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+        req = urllib.request.Request(base + path, data=data, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            return e.code, json.load(e)
+
+    with urllib.request.urlopen(base + "/source?file=" + urllib.parse.quote(other), timeout=5) as r:
+        src = json.load(r)
+    status, model = call("POST", "/model", src["text"].encode())
+    check("model lists states", status == 200 and {o["id"] for o in model["objects"]} == {"a", "b"})
+    status, edited = call("POST", "/edit", {"text": src["text"], "op": {"kind": "rename", "id": "b", "to": "c"}})
+    check("edit renames", status == 200 and edited["text"] == "a -> c\n", str(edited))
+    status, saved = call("PUT", "/source", {"file": other, "baseHash": src["hash"], "text": edited["text"]})
+    check("source saves", status == 200 and open(other).read() == "a -> c\n")
+    status, stale = call("PUT", "/source", {"file": other, "baseHash": src["hash"], "text": "x\n"})
+    check("stale save is refused", status == 409 and stale["text"] == "a -> c\n")
+
+    events = urllib.request.urlopen(base + "/events?file=" + urllib.parse.quote(other), timeout=5)
+    time.sleep(0.2)
+    with open(other, "w") as fh:
+        fh.write("a -> d\n")
+    got_source = False
+    deadline = time.time() + 3
+    while time.time() < deadline and not got_source:
+        line = events.readline().decode()
+        if line.startswith("data: {") and json.loads(line[6:])["text"] == "a -> d\n":
+            got_source = True
+    events.close()
+    check("external write streams a source event", got_source)
 finally:
     lsp.stdin.close()
     lsp.wait(timeout=10)

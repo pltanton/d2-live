@@ -11,6 +11,7 @@ What it does:
 - zoomable UI with preserving position, for seamless re-rendering
 - one shared server for many files, with a file dropdown in the UI
 - editor integration over LSP (no keybindings or custom glue needed)
+- edit mode: change states and transitions on the diagram, with the code alongside
 
 ## Run
 
@@ -127,12 +128,47 @@ ever blocking:
 skills/d2-live/scripts/d2-live-preview ./docs/diagrams
 ```
 
+## Edit mode
+
+Press `E` (or the **Edit** button) in a tab. A code panel opens next to the
+diagram; the diagram, the code and the file stay in sync both ways.
+
+- **Select** a state or transition by clicking it, or by putting the cursor in
+  its declaration. Its declaration is highlighted in the code, its other
+  mentions faintly.
+- **Inspector** under the code: ID (renaming follows every reference), label
+  (markdown labels stay `|md` blocks), class, shape, style overrides and the
+  `#` comment above the declaration. Click **edit** next to a class to change
+  the class itself.
+- **On the diagram:** the toolbar over a selected state changes its class,
+  connects or deletes it; the `+` handles create a new state wired to it
+  (click), or connect it to another state (drag onto it; drop on empty canvas
+  for a new one). Keys: `N` new state, `C` connect, `⌫` delete, `Enter` rename,
+  `Esc` deselect, `⌘Z` / `⇧⌘Z` undo/redo.
+- Every change is written to the file (300 ms after typing stops, at once for
+  structural changes) and flashes in the code as a diff. Structural edits touch
+  only the lines they are about: comments, ordering and formatting elsewhere stay
+  as they were.
+- External edits (your editor, an agent, `git checkout`) appear live. If one
+  races unsaved typing, a banner offers **Take theirs** / **Keep mine**.
+- While the code does not compile, the last good diagram stays on screen and the
+  error is shown under the editor.
+
+Structural edits cover flat diagrams (top-level states, single `a -> b`
+transitions) — the shape of a state machine. Containers, chains like
+`a -> b -> c` and globs stay editable in the code panel; the inspector says so
+instead of guessing.
+
 ## Development
 
 ```bash
 go test ./...                                    # unit tests
-go build -o d2-live . && ./scripts/itest.py ./d2-live   # end-to-end: LSP stdio, CLI, watcher, prune
+go build -o d2-live . && ./scripts/itest.py ./d2-live   # end-to-end: LSP stdio, CLI, watcher, prune, edit endpoints
+go test -run TestOps -update                     # regenerate testdata/golden after an intended change to an edit op
 ```
+
+The code panel uses a prebuilt CodeMirror bundle, `ui/vendor/codemirror.js`.
+To rebuild it: `cd scripts/codemirror && npm ci && npm run build`.
 
 The end-to-end script drives a real binary in an isolated `XDG_RUNTIME_DIR`, so
 it never touches a server you have running.
