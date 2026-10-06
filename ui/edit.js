@@ -3,7 +3,7 @@ import { createOverlay } from './overlay.js';
 import { renderInspector, classFill } from './inspector.js';
 import { undo, redo, undoDepth, redoDepth } from './vendor/codemirror.js';
 
-const AUTOSAVE_MS = 300;
+const PREVIEW_MS = 200;
 const MODEL_MS = 120;
 const PANEL_KEY = 'd2-live:panel-width';
 const INSPECTOR_KEY = 'd2-live:inspector-collapsed';
@@ -20,7 +20,6 @@ const st = {
   modelText: null,
   sel: null,
   errors: {},
-  saveTimer: null,
   saving: null,
   theirs: null,
   modelTimer: null,
@@ -31,6 +30,8 @@ const st = {
   down: null,
   active: false,
   renderTimer: null,
+  saveNext: false,
+  previewTimer: null,
   reveal: null,
 };
 
@@ -45,9 +46,16 @@ export async function enable(d2live) {
   await loadSource();
 }
 
+export function confirmLeave() {
+  if (!st.active || ed.text() === st.disk.text) return Promise.resolve(true);
+  if (window.confirm('Save changes to ' + api.state.file.split('/').pop() + '?')) return save().then(() => true);
+  ed.reset(st.disk.text);
+  api.previewText = null;
+  return Promise.resolve(true);
+}
+
 export function disable() {
   st.active = false;
-  flushSave();
   cancelConnect();
   select(null);
   ui.panel.hidden = true;
@@ -88,6 +96,7 @@ function build() {
     h('header', {class: 'd2l-head'},
       h('span', {class: 'd2l-head-title'}, 'Code'),
       status,
+      h('button', {type: 'button', class: 'd2l-save', title: 'Save to file (⌘S)', onclick: () => save()}, 'Save'),
       h('button', {type: 'button', class: 'd2l-close', title: 'Leave edit mode (E)', onclick: () => api.setEditing(false)}, '✕')),
     banner, code, error, inspectorBox);
   const undoBtn = h('button', {type: 'button', title: 'Undo (⌘Z)', class: 'd2l-icon', onclick: () => history(undo)}, '↶');
@@ -125,6 +134,9 @@ function build() {
   document.addEventListener('d2l:source', (e) => onSource(e.detail));
   document.addEventListener('d2l:file', () => st.active && loadSource());
   document.addEventListener('keydown', onKey);
+  window.addEventListener('beforeunload', (e) => {
+    if (st.active && ed.text() !== st.disk.text) e.preventDefault();
+  });
   document.addEventListener('pointermove', onPointerMove);
   api.scene.addEventListener('pointerdown', (e) => (st.down = {x: e.clientX, y: e.clientY}));
   api.scene.addEventListener('click', onSceneClick);
@@ -180,27 +192,31 @@ async function loadSource() {
   await refreshModel();
 }
 
-function onDocChange(text, programmatic) {
+function onDocChange(text) {
   scheduleModel();
   syncHistoryButtons();
+  clearTimeout(st.previewTimer);
   if (text === st.disk.text) {
+    st.saveNext = false;
+    api.previewText = null;
     setStatus('saved');
     return;
   }
-  setStatus('dirty');
-  clearTimeout(st.saveTimer);
-  st.saveTimer = setTimeout(save, programmatic ? 0 : AUTOSAVE_MS);
-}
-
-function flushSave() {
-  if (st.saveTimer) {
-    clearTimeout(st.saveTimer);
+  if (st.saveNext) {
+    st.saveNext = false;
     save();
+    return;
   }
+  setStatus('dirty');
+  st.previewTimer = setTimeout(() => {
+    api.previewText = ed.text();
+    setRendering(true);
+    api.reloadSvg();
+  }, PREVIEW_MS);
 }
 
 async function save() {
-  st.saveTimer = null;
+  clearTimeout(st.previewTimer);
   if (st.saving) {
     await st.saving;
   }
@@ -223,7 +239,12 @@ async function save() {
       }
       if (!res.ok) throw new Error(res.status);
       st.disk = {text, hash: body.hash};
-      setStatus(ed.text() === text ? 'saved' : 'dirty');
+      if (ed.text() === text) {
+        api.previewText = null;
+        setStatus('saved');
+      } else {
+        setStatus('dirty');
+      }
     } catch (err) {
       setRendering(false);
       setStatus('error');
@@ -232,9 +253,6 @@ async function save() {
   })();
   await st.saving;
   st.saving = null;
-  if (ed.text() !== st.disk.text && !st.saveTimer && !st.theirs) {
-    st.saveTimer = setTimeout(save, AUTOSAVE_MS);
-  }
 }
 
 function onSource({text, hash}) {
@@ -244,7 +262,7 @@ function onSource({text, hash}) {
     setStatus('saved');
     return;
   }
-  if (ed.text() === st.disk.text && !st.saving && !st.saveTimer) {
+  if (ed.text() === st.disk.text && !st.saving) {
     st.disk = {text, hash};
     ed.replace(text);
     setStatus('saved');
@@ -279,11 +297,12 @@ function keepMine() {
   save();
 }
 
-const STATUS_TEXT = {saved: 'Saved', dirty: 'Editing…', saving: 'Saving…', error: 'Not saved', conflict: 'Conflict'};
+const STATUS_TEXT = {saved: 'Saved', dirty: 'Unsaved', saving: 'Saving…', error: 'Not saved', conflict: 'Conflict'};
 
 function setStatus(s) {
   ui.status.dataset.state = s;
   ui.status.textContent = STATUS_TEXT[s];
+  ui.panel.classList.toggle('d2l-dirty', s === 'dirty' || s === 'error');
 }
 
 // ---- model ----
@@ -343,7 +362,8 @@ function decodeId(token) {
 
 function onSvg(e) {
   if (!st.active) return;
-  if (!e.detail.hash || e.detail.hash === st.disk.hash) setRendering(false);
+  const d = e.detail;
+  if (d.preview ? d.latest : (!d.hash || d.hash === st.disk.hash)) setRendering(false);
   indexSvg();
   applySelection({scroll: false, inspector: false});
   if (st.reveal) {
@@ -378,7 +398,9 @@ function syncHistoryButtons() {
 }
 
 function history(cmd) {
+  st.saveNext = true;
   cmd(ed.view);
+  st.saveNext = false;
   syncHistoryButtons();
 }
 
@@ -560,7 +582,9 @@ async function runOp(op, field) {
     return false;
   }
   if (op.kind === 'set' && op.key === 'class' && op.value && st.sel) st.lastClass[st.sel.kind] = op.value;
+  st.saveNext = true;
   ed.replace(body.text);
+  st.saveNext = false;
   await refreshModel();
   const target = body.select || (op.kind !== 'delete' && st.sel && st.sel.id);
   if (target) st.reveal = target;
@@ -676,6 +700,11 @@ function onSceneDblClick(e) {
 
 function onKey(e) {
   if (!st.active) return;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    save();
+    return;
+  }
   if (e.key === 'Escape') {
     if (st.connect) cancelConnect();
     else if (!api.typingTarget(e.target)) select(null);

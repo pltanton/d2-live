@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"sync"
 
+	"d2-live/internal/elklayout"
 	"oss.terrastruct.com/d2/d2graph"
 	"oss.terrastruct.com/d2/d2layouts/d2dagrelayout"
-	"oss.terrastruct.com/d2/d2layouts/d2elklayout"
 	"oss.terrastruct.com/d2/d2lib"
 	"oss.terrastruct.com/d2/d2renderers/d2svg"
 	"oss.terrastruct.com/d2/lib/log"
@@ -17,25 +17,27 @@ import (
 )
 
 var inProcessLayouts = map[string]d2graph.LayoutGraph{
-	"elk":   func(ctx context.Context, g *d2graph.Graph) error { return d2elklayout.DefaultLayout(ctx, g) },
+	"elk":   func(ctx context.Context, g *d2graph.Graph) error { return elklayout.DefaultLayout(ctx, g) },
 	"dagre": func(ctx context.Context, g *d2graph.Graph) error { return d2dagrelayout.DefaultLayout(ctx, g) },
 }
 
+// renderMu serialises in-process renders: the text ruler and the warm ELK
+// runtime are shared and not safe for concurrent use.
 var (
-	rulerMu sync.Mutex
-	ruler   *textmeasure.Ruler
+	renderMu sync.Mutex
+	ruler    *textmeasure.Ruler
 )
 
 // renderInProcess lays out and renders with the d2 library, skipping a d2
-// process per render (withdraw-fsm: dagre 0.44s via CLI vs 0.1s here, elk 2.0s vs 1.5s).
+// process per render (withdraw-fsm: dagre 0.44s via CLI vs 0.1s here).
 // ok is false for engines that only exist as external plugins (tala).
 func renderInProcess(file string, src []byte, layout string, sketch bool) (svg string, ok bool, err error) {
 	layoutFn, ok := inProcessLayouts[layout]
 	if !ok {
 		return "", false, nil
 	}
-	rulerMu.Lock()
-	defer rulerMu.Unlock()
+	renderMu.Lock()
+	defer renderMu.Unlock()
 	if ruler == nil {
 		if ruler, err = textmeasure.NewRuler(); err != nil {
 			return "", true, err

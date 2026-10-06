@@ -647,3 +647,23 @@ body.d2l-pending #scene {
 #scene {
   transition: opacity 160ms var(--emph);
 }
+
+.d2l-save {
+  display: none;
+  margin-left: auto;
+  border: none;
+  border-radius: var(--r-pill);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.d2l-dirty .d2l-save {
+  display: inline-block;
+}
+.d2l-dirty .d2l-close {
+  margin-left: 0;
+}

@@ -141,14 +141,15 @@ diagram; the diagram, the code and the file stay in sync both ways.
   `#` comment above the declaration. Click **edit** next to a class to change
   the class itself.
 - **On the diagram:** the toolbar over a selected state changes its class,
-  connects or deletes it; the `+` handles create a new state wired to it
-  (click), or connect it to another state (drag onto it; drop on empty canvas
-  for a new one). Keys: `N` new state, `C` connect, `⌫` delete, `Enter` rename,
-  `Esc` deselect, `⌘Z` / `⇧⌘Z` undo/redo.
-- Every change is written to the file (300 ms after typing stops, at once for
-  structural changes) and flashes in the code as a diff. Structural edits touch
-  only the lines they are about: comments, ordering and formatting elsewhere stay
-  as they were.
+  connects or deletes it. Connect (`→`), then click another state for a
+  transition, or empty canvas for a new state wired to it. Keys: `N` new state, `C` connect, `⌫` delete, `Enter` rename,
+  `Esc` deselect, `F` fit to screen, `⌘Z` / `⇧⌘Z` undo/redo, `⌘S` save.
+- Typing in the code panel previews the buffer live without touching the file;
+  `⌘S` (or **Save**) writes it. Structural changes from the inspector or the
+  diagram, and undo/redo from the toolbar, are written at once. Every change
+  flashes in the code as a diff, and touches only the lines it is about:
+  comments, ordering and formatting elsewhere stay as they were. Leaving edit
+  mode or switching files with unsaved typing asks first.
 - External edits (your editor, an agent, `git checkout`) appear live. If one
   races unsaved typing, a banner offers **Take theirs** / **Keep mine**.
 - While the code does not compile, the last good diagram stays on screen and the

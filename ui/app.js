@@ -287,16 +287,30 @@ let svgShown = 0;
 
 async function reloadSvg() {
   const seq = ++svgRequested;
+  const preview = state.edit && window.d2live && window.d2live.previewText != null;
   try {
-    const response = await fetch('/svg?' + query('ts=' + Date.now() + (state.edit ? '&edit=1' : '')));
+    const response = preview
+      ? await fetch('/render?' + query(), {method: 'POST', body: window.d2live.previewText})
+      : await fetch('/svg?' + query('ts=' + Date.now() + (state.edit ? '&edit=1' : '')));
+    const detail = {
+      error: response.headers.get('X-D2-Error'),
+      hash: response.headers.get('X-D2-Hash'),
+      preview,
+      latest: seq === svgRequested,
+    };
+    if (!response.ok) {
+      document.dispatchEvent(new CustomEvent('d2l:svg', {detail}));
+      return;
+    }
     const svg = await response.text();
     if (seq < svgShown) {
       return;
     }
     svgShown = seq;
+    detail.latest = seq === svgRequested;
     scene.innerHTML = svg;
     prepareSnapshot(svg);
-    document.dispatchEvent(new CustomEvent('d2l:svg', {detail: {error: response.headers.get('X-D2-Error'), hash: response.headers.get('X-D2-Hash')}}));
+    document.dispatchEvent(new CustomEvent('d2l:svg', {detail}));
   } catch (err) {
     showToast('update failed');
   }
@@ -403,8 +417,14 @@ async function refreshFiles() {
 }
 
 fileSelect.addEventListener('mousedown', refreshFiles);
-fileSelect.addEventListener('change', (event) => {
-  applyState({file: event.target.value}, true);
+fileSelect.addEventListener('change', async (event) => {
+  const next = event.target.value;
+  if (state.edit && editModule) {
+    event.target.value = state.file;
+    await editModule.confirmLeave();
+    event.target.value = next;
+  }
+  applyState({file: next}, true);
 });
 layoutSelect.addEventListener('change', (event) => {
   applyState({layout: event.target.value}, false);
@@ -433,6 +453,7 @@ async function setEditing(on) {
       return;
     }
   } else if (editModule) {
+    await editModule.confirmLeave();
     editModule.disable();
   }
   await reloadSvg();

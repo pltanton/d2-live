@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"d2-live/internal/elklayout"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -424,6 +425,7 @@ func postClose(port int, path string) error {
 func (s *server) start(ln net.Listener) error {
 	go s.watchLoop()
 	go s.idleMonitor()
+	go elklayout.Warm()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
@@ -438,6 +440,7 @@ func (s *server) start(ln net.Listener) error {
 	mux.HandleFunc("/files", s.handleFiles)
 	mux.HandleFunc("/source", s.handleSource)
 	mux.HandleFunc("/edit", handleEdit)
+	mux.HandleFunc("/render", s.handleRender)
 	mux.HandleFunc("/model", handleModel)
 
 	return (&http.Server{Handler: mux}).Serve(ln)
@@ -1123,6 +1126,38 @@ func (s *server) handleSVG(w http.ResponseWriter, r *http.Request) {
 			svg = good
 		}
 		w.Header().Set("X-D2-Error", strings.ReplaceAll(err.Error(), "\n", " "))
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	_, _ = w.Write([]byte(svg))
+}
+
+// handleRender renders an unsaved buffer for the editor's live preview; the
+// file on disk is only used to resolve imports relative to it.
+func (s *server) handleRender(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	q := r.URL.Query()
+	abs, ok := s.registeredFile(w, q.Get("file"))
+	if !ok {
+		return
+	}
+	src, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	layout := q.Get("layout")
+	if layout == "" {
+		layout = s.layout
+	}
+	svg, err := renderSVG(abs, src, layout, q.Get("sketch") == "true")
+	w.Header().Set("X-D2-Hash", contentHash(src))
+	if err != nil {
+		w.Header().Set("X-D2-Error", strings.ReplaceAll(err.Error(), "\n", " "))
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
 	}
 	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
 	_, _ = w.Write([]byte(svg))
