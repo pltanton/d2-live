@@ -7,6 +7,8 @@ const paths = {
   redo: 'M10.5 3.5l3 3-3 3 M13.5 6.5h-7a3.5 3.5 0 0 0 0 7H9',
   fit: 'M2.5 6V2.5H6 M10 2.5h3.5V6 M13.5 10v3.5H10 M6 13.5H2.5V10',
   plus: 'M8 3v10 M3 8h10',
+  up: 'M8 13V3.5 M4.5 7L8 3.5 11.5 7',
+  down: 'M8 3v9.5 M4.5 9L8 12.5 11.5 9',
 };
 
 export function icon(name) {

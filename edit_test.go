@@ -14,10 +14,16 @@ var update = flag.Bool("update", false, "rewrite testdata/golden files")
 func sp(s string) *string { return &s }
 
 func TestOps(t *testing.T) {
-	fsm, err := os.ReadFile("testdata/withdraw-fsm.d2")
-	if err != nil {
-		t.Fatal(err)
+	read := func(name string) string {
+		b, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
 	}
+	fsm := read("withdraw-fsm.d2")
+	nested := read("containers.d2")
+	seq := read("sequence.d2")
 	cases := []struct {
 		name    string
 		src     string
@@ -52,12 +58,36 @@ func TestOps(t *testing.T) {
 		{name: "delete_collapses_blank", src: "a\n\n# about b\nb\n\nc\n", op: editOp{Kind: "delete", ID: "b"}},
 		{name: "delete_last_trims_blank", src: "a\n\nb\n", op: editOp{Kind: "delete", ID: "b"}},
 		{name: "bare_node_set", src: "a\nb\n", op: editOp{Kind: "set", ID: "a", Key: "style.fill", Value: sp("red")}},
+
+		{name: "nested_rename", src: nested, op: editOp{Kind: "rename", ID: "cmp.before.api", To: "gateway"}, wantSel: "cmp.before.gateway"},
+		{name: "nested_rename_sibling_conflict", src: nested, op: editOp{Kind: "rename", ID: "cmp.before.api", To: "worker"}, wantErr: "to"},
+		{name: "nested_rename_other_container_ok", src: nested, op: editOp{Kind: "rename", ID: "cmp.after.worker", To: "queue"}, wantSel: "cmp.after.queue"},
+		{name: "nested_set_class", src: nested, op: editOp{Kind: "set", ID: "cmp.after.worker", Key: "class", Value: sp("async")}},
+		{name: "nested_create_node", src: nested, op: editOp{Kind: "createNode", Parent: "cmp.after", Class: "svc"}, wantSel: "cmp.after.NEW_STATE"},
+		{name: "nested_create_edge", src: nested, op: editOp{Kind: "createEdge", Src: "cmp.after.worker", Dst: "cmp.after.api", Label: "2 · ack"}, wantSel: "cmp.after.(worker -> api)[0]"},
+		{name: "nested_create_edge_across", src: nested, op: editOp{Kind: "createEdge", Src: "cmp.before.api", Dst: "cmp.after.api"}, wantSel: "cmp.(before.api -> after.api)[0]"},
+		{name: "nested_node_with_edge", src: nested, op: editOp{Kind: "createNodeWithEdge", Src: "cmp.after.worker", Class: "svc", EdgeClass: "svc"}, wantSel: "cmp.after.NEW_STATE"},
+		{name: "nested_delete", src: nested, op: editOp{Kind: "delete", ID: "cmp.before.queue"}},
+		{name: "nested_delete_container", src: nested, op: editOp{Kind: "delete", ID: "cmp.after"}},
+		{name: "nested_comment", src: nested, op: editOp{Kind: "setComment", ID: "cmp.after.(api -> worker)[0]", Text: "now a direct call"}},
+
+		{name: "seq_rename_actor", src: seq, op: editOp{Kind: "rename", ID: "seq.server", To: "backend"}, wantSel: "seq.backend"},
+		{name: "seq_rename_group", src: seq, op: editOp{Kind: "rename", ID: "seq.1 · Register", To: "1 · Create"}, wantSel: "seq.1 · Create"},
+		{name: "seq_message_after", src: seq, op: editOp{Kind: "createEdge", Src: "seq.server", Dst: "seq.ledger", Label: "check limits", After: "seq.(client -> server)[0]"}, wantSel: "seq.(server -> ledger)[0]"},
+		{name: "seq_message_append", src: seq, op: editOp{Kind: "createEdge", Src: "seq.client", Dst: "seq.ledger", Label: "audit"}, wantSel: "seq.(client -> ledger)[0]"},
+		{name: "seq_message_append_after_groups", src: strings.Replace(seq, "\n  server -> client: \"notify\"\n", "\n", 1), op: editOp{Kind: "createEdge", Src: "seq.client", Dst: "seq.ledger", Label: "audit"}},
+		{name: "seq_move_up", src: seq, op: editOp{Kind: "move", ID: "seq.(server -> client)[0]", Dir: -1}, wantSel: "seq.(server -> client)[0]"},
+		{name: "seq_move_down", src: seq, op: editOp{Kind: "move", ID: "seq.(client -> server)[0]", Dir: 1}, wantSel: "seq.(client -> server)[0]"},
+		{name: "seq_move_past_end", src: seq, op: editOp{Kind: "move", ID: "seq.(server -> client)[0]", Dir: 1}, wantErr: "bottom"},
+		{name: "seq_create_actor", src: seq, op: editOp{Kind: "createNode", Parent: "seq", Name: "actor"}, wantSel: "seq.actor"},
+		{name: "seq_delete_message", src: seq, op: editOp{Kind: "delete", ID: "seq.(ledger -> server)[1]"}},
+		{name: "seq_reverse", src: seq, op: editOp{Kind: "reverse", ID: "seq.(server -> ledger)[0]"}, wantSel: "seq.(ledger -> server)[2]"}, // d2 numbers sequence messages by group, not by line
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.src
 			if src == "" {
-				src = string(fsm)
+				src = fsm
 			}
 			out, sel, err := applyOp(src, tc.op)
 			if tc.wantErr != "" {

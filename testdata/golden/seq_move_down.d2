@@ -1,0 +1,26 @@
+seq: "" {
+  shape: sequence_diagram
+
+  client: "Client" {style.fill: "#EEF5FF"}
+  server: "Server (FSM)" {style.fill: "#FFF4E5"}
+  ledger: "Ledger"
+
+  "1 · Register": {
+    server -> server: "state → CREATED"
+    client -> server: "POST /orders" {style.stroke: "#2E7D32"}
+    server -> client: "201 {id}" {style.stroke-dash: 3}
+  }
+
+  "2 · Hold": {
+    server -> ledger: "create hold"
+    "ALT · hold ok": {
+      ledger -> server: "ok"
+      server -> server: "state → HELD"
+    }
+    "ALT · rejected": {
+      ledger -> server: "rejected(reason)"
+    }
+  }
+
+  server -> client: "notify"
+}

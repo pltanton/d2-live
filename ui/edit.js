@@ -100,17 +100,18 @@ function build() {
       h('button', {type: 'button', class: 'd2l-save', title: 'Save to file (⌘S)', onclick: () => save()}, 'Save'),
       h('button', {type: 'button', class: 'd2l-close', title: 'Leave edit mode (E)', onclick: () => api.setEditing(false)}, '✕')),
     banner, code, error, inspectorBox);
+  const newBtn = h('button', {type: 'button', title: 'New shape (N)', onclick: createNode}, icon('plus'), ' State');
   const undoBtn = h('button', {type: 'button', title: 'Undo (⌘Z)', class: 'd2l-icon', onclick: () => history(undo)}, icon('undo'));
   const redoBtn = h('button', {type: 'button', title: 'Redo (⇧⌘Z)', class: 'd2l-icon', onclick: () => history(redo)}, icon('redo'));
   const toolbar = h('div', {id: 'd2l-toolbar'},
     undoBtn, redoBtn, h('span', {class: 'd2l-sep'}),
-    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, icon('plus'), ' State'),
+    newBtn,
     h('span', {class: 'd2l-sep'}),
     h('button', {type: 'button', title: 'Fit to screen (F)', class: 'd2l-icon', onclick: () => api.fitView()}, icon('fit')));
   const hint = h('div', {id: 'd2l-hint', hidden: ''});
   const rendering = h('div', {id: 'd2l-rendering', hidden: ''}, h('span', {class: 'd2l-spinner'}), 'Rendering…');
   document.body.append(panel, toolbar, hint, rendering);
-  ui = {panel, status, banner, code, error, inspector, inspectorBox, toggle, toolbar, undoBtn, redoBtn, hint, rendering};
+  ui = {panel, status, banner, code, error, inspector, inspectorBox, toggle, toolbar, undoBtn, redoBtn, newBtn, hint, rendering};
 
   try {
     const w = parseInt(localStorage.getItem(PANEL_KEY), 10);
@@ -342,8 +343,8 @@ function find(sel) {
 }
 
 function kindOf(id) {
-  if (id.startsWith('(')) return 'edge';
   if (id.startsWith('classes.')) return 'class';
+  if (st.model && st.model.edges.some((e) => e.id === id)) return 'edge';
   return 'object';
 }
 
@@ -413,11 +414,13 @@ function indexSvg() {
   for (const g of api.scene.querySelectorAll('g[class]')) {
     const token = g.getAttribute('class').split(' ')[0];
     if (!/^[A-Za-z0-9+/]+=*$/.test(token)) continue;
-    const id = decodeId(token);
-    if (!id || !known.has(id)) continue;
+    let id = decodeId(token);
+    const lifeline = id && /^\((.+) -- \)\[\d+\]$/.exec(id);
+    if (lifeline && known.has(lifeline[1])) id = lifeline[1];
+    if (!id || !known.has(id) || (lifeline && st.gById.has(id))) continue;
     st.gById.set(id, g);
     st.idByG.set(g, id);
-    if (id.startsWith('(') && !g.querySelector('[data-d2l]')) {
+    if (kindOf(id) === 'edge' && !g.querySelector('[data-d2l]')) {
       const path = g.querySelector('path.connection');
       if (path) {
         const hit = path.cloneNode(false);
@@ -443,6 +446,7 @@ function hitTest(target) {
 function select(sel, {scroll = true} = {}) {
   closeClassMenu();
   st.sel = sel;
+  syncNewButton();
   st.errors = {};
   applySelection({scroll, inspector: true});
 }
@@ -498,12 +502,29 @@ function miniButtons(sel, item) {
       f.select && f.select();
     }
   };
+  const del = btn(icon('trash'), 'Delete (⌫)', removeSelected, 'd2l-danger-btn');
+  if (sel.kind === 'object' && item.kind === 'group') {
+    return [btn(icon('pencil'), 'Rename the group (Enter)', focusField), del];
+  }
+  if (sel.kind === 'object' && item.kind === 'sequence') {
+    return [btn(icon('plus'), 'New actor (N)', createNode), del];
+  }
   if (sel.kind === 'object') {
     return [
       btn(icon('pencil'), 'Rename (Enter)', focusField),
       classPick(),
-      btn(icon('arrow'), 'Connect to another state (C)', () => toggleConnect()),
-      btn(icon('trash'), 'Delete (⌫)', removeSelected, 'd2l-danger-btn'),
+      btn(icon('arrow'), item.kind === 'actor' ? 'New message to another actor (C)' : 'Connect to another shape (C)', () => toggleConnect()),
+      del,
+    ];
+  }
+  if (sel.kind === 'edge' && item.sequence) {
+    return [
+      btn(icon('pencil'), 'Edit the message (Enter)', focusField),
+      btn(icon('up'), 'Move up', () => runOp({kind: 'move', id: sel.id, dir: -1})),
+      btn(icon('down'), 'Move down', () => runOp({kind: 'move', id: sel.id, dir: 1})),
+      btn(icon('plus'), 'New message after this one', () => insertMessageAfter(item)),
+      btn(icon('swap'), 'Reverse', () => runOp({kind: 'reverse', id: sel.id})),
+      del,
     ];
   }
   if (sel.kind === 'edge') {
@@ -511,7 +532,7 @@ function miniButtons(sel, item) {
       btn(icon('pencil'), 'Edit label (Enter)', focusField),
       classPick(),
       btn(icon('swap'), 'Reverse', () => runOp({kind: 'reverse', id: sel.id})),
-      btn(icon('trash'), 'Delete (⌫)', removeSelected, 'd2l-danger-btn'),
+      del,
     ];
   }
   return null;
@@ -550,9 +571,16 @@ function onCursor(pos) {
   if (!st.model || st.modelText !== ed.text()) return;
   const inside = (r) => r && r.from <= pos && pos <= r.to;
   let hit = null;
-  for (const e of st.model.edges) if (inside(e.decl)) hit = {kind: 'edge', id: e.id};
-  for (const o of st.model.objects) if (inside(o.decl)) hit = {kind: 'object', id: o.id};
-  for (const c of st.model.classes) if (inside(c.decl)) hit = {kind: 'class', id: 'classes.' + c.name};
+  let size = Infinity;
+  const consider = (r, h) => {
+    if (inside(r) && r.to - r.from < size) {
+      hit = h;
+      size = r.to - r.from;
+    }
+  };
+  for (const e of st.model.edges) consider(e.decl, {kind: 'edge', id: e.id});
+  for (const o of st.model.objects) consider(o.decl, {kind: 'object', id: o.id});
+  for (const c of st.model.classes) consider(c.decl, {kind: 'class', id: 'classes.' + c.name});
   if (!hit && st.sel) {
     const item = find(st.sel);
     if (item && item.refs && item.refs.some(inside)) return;
@@ -617,9 +645,49 @@ function defaultClass(kind) {
   return best;
 }
 
+// containerForNew is where N / + State puts a new shape: inside the selected
+// container, next to the selected shape, or at the arrow's source level.
+function containerForNew() {
+  const item = find(st.sel);
+  if (!item) return null;
+  if (st.sel.kind === 'edge') {
+    const src = st.model.objects.find((o) => o.id === item.src);
+    return src ? src.parent : '';
+  }
+  if (st.sel.kind !== 'object') return '';
+  if (['container', 'sequence'].includes(item.kind)) return item.id;
+  if (item.kind === 'group') return sequenceIdOf(item);
+  return item.parent;
+}
+
+function sequenceIdOf(item) {
+  for (let o = item; o; o = st.model.objects.find((x) => x.id === o.parent)) {
+    if (o.kind === 'sequence') return o.id;
+  }
+  return '';
+}
+
+function inSequence(parent) {
+  const p = st.model.objects.find((o) => o.id === parent);
+  return !!p && p.kind === 'sequence';
+}
+
 async function createNode() {
   if (!st.model) return;
-  if (await runOp({kind: 'createNode', class: defaultClass('object')})) focusId();
+  const parent = containerForNew() || '';
+  const op = inSequence(parent)
+    ? {kind: 'createNode', parent, name: 'actor'}
+    : {kind: 'createNode', parent, class: defaultClass('object')};
+  if (await runOp(op)) focusId();
+}
+
+async function insertMessageAfter(edge) {
+  if (await runOp({kind: 'createEdge', src: edge.src, dst: edge.dst, label: 'new message', after: edge.id})) focusId();
+}
+
+function syncNewButton() {
+  const parent = st.model ? containerForNew() : '';
+  ui.newBtn.lastChild.textContent = st.model && inSequence(parent) ? ' Actor' : ' State';
 }
 
 async function createFrom(src) {

@@ -132,10 +132,23 @@ export function renderInspector(root, ctx) {
 
   const deleteBtn = h('button', {type: 'button', class: 'd2l-danger', title: 'Delete (⌫)', onclick: () => ctx.remove()}, 'Delete');
 
-  if (kind === 'object') {
+  const nameOf = (id) => {
+    const o = model.objects.find((x) => x.id === id);
+    return o ? o.name : id;
+  };
+  const chip = {shape: 'State', container: 'Container', actor: 'Actor', group: 'Group', sequence: 'Sequence'};
+
+  if (kind === 'object' && item.kind === 'group') {
     root.append(
-      header('State', item.id, deleteBtn),
-      field('ID', textInput(item.id, (v) => ctx.op({kind: 'rename', id: item.id, to: v}, 'to'), {'data-focus': 'id'}), 'to'),
+      header('Group', item.name, deleteBtn),
+      field('Title', textInput(item.name, (v) => ctx.op({kind: 'rename', id: item.id, to: v}, 'to'), {'data-focus': 'id'}), 'to'),
+      field('Comment', textArea(item.comment ? item.comment.text : '',
+        (v) => ctx.op({kind: 'setComment', id: item.id, text: v}, 'comment'), {placeholder: '# above the group'}), 'comment'),
+    );
+  } else if (kind === 'object') {
+    root.append(
+      header(chip[item.kind] || 'State', item.name, deleteBtn),
+      field('ID', textInput(item.name, (v) => ctx.op({kind: 'rename', id: item.id, to: v}, 'to'), {'data-focus': 'id'}), 'to'),
       field(item.markdown ? 'Label · markdown' : 'Label',
         textArea(item.label, set('label'), {placeholder: 'shows the ID', class: item.markdown ? 'd2l-md' : ''}), 'label'),
       field('Class', classSelect(item.props.class), 'class'),
@@ -150,11 +163,11 @@ export function renderInspector(root, ctx) {
     );
   } else if (kind === 'edge') {
     root.append(
-      header('Transition', `${item.src} → ${item.dst}`, deleteBtn),
+      header(item.sequence ? 'Message' : 'Transition', `${nameOf(item.src)} → ${nameOf(item.dst)}`, deleteBtn),
       h('div', {class: 'd2l-row d2l-ends'},
-        h('button', {type: 'button', class: 'd2l-link', onclick: () => ctx.select({kind: 'object', id: item.src})}, item.src),
+        h('button', {type: 'button', class: 'd2l-link', onclick: () => ctx.select({kind: 'object', id: item.src})}, nameOf(item.src)),
         h('span', {}, '→'),
-        h('button', {type: 'button', class: 'd2l-link', onclick: () => ctx.select({kind: 'object', id: item.dst})}, item.dst),
+        h('button', {type: 'button', class: 'd2l-link', onclick: () => ctx.select({kind: 'object', id: item.dst})}, nameOf(item.dst)),
         h('button', {type: 'button', class: 'd2l-ghost-btn', title: 'Reverse', onclick: () => ctx.op({kind: 'reverse', id: item.id})}, icon('swap'))),
       field('Label', textArea(item.label, set('label'), {placeholder: 'event or action', 'data-focus': 'id'}), 'label'),
       field('Class', classSelect(item.props.class), 'class'),

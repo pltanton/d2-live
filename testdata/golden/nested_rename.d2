@@ -1,0 +1,33 @@
+classes: {
+  svc: {style: {fill: "#E8F1FB"; stroke: "#2B6CB0"}}
+  async: {style: {stroke: "#7B3FBF"; stroke-dash: 4}}
+}
+
+cmp: "" {
+  grid-columns: 2
+
+  before: "Before" {
+    style: {fill: "#FFF5F5"; stroke-dash: 4}
+
+    gateway: "api" {class: svc}
+    worker: "worker" {class: svc}
+    queue: "jobs" {shape: queue}
+
+    # the api enqueues and returns at once
+    gateway -> queue: "1 · enqueue" {class: async}
+    queue -> worker: "2 · consume" {class: async}
+  }
+
+  after: "After" {
+    api: "api" {class: svc}
+    worker: "worker" {class: svc}
+
+    api -> worker: "1 · call" {class: svc}
+  }
+}
+
+notes: |md
+  **Notes** stay outside the comparison.
+|
+
+cmp -> notes: "" {style.opacity: 0}

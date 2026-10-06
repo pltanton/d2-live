@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"oss.terrastruct.com/d2/d2ast"
+	"oss.terrastruct.com/d2/d2graph"
 )
 
 type span struct {
@@ -23,6 +24,9 @@ type commentModel struct {
 
 type objectModel struct {
 	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Parent   string            `json:"parent"`
+	Kind     string            `json:"kind"`
 	Label    string            `json:"label"`
 	Markdown bool              `json:"markdown"`
 	Props    map[string]string `json:"props"`
@@ -32,13 +36,14 @@ type objectModel struct {
 }
 
 type edgeModel struct {
-	ID      string            `json:"id"`
-	Src     string            `json:"src"`
-	Dst     string            `json:"dst"`
-	Label   string            `json:"label"`
-	Props   map[string]string `json:"props"`
-	Decl    *span             `json:"decl"`
-	Comment *commentModel     `json:"comment"`
+	ID       string            `json:"id"`
+	Sequence bool              `json:"sequence"`
+	Src      string            `json:"src"`
+	Dst      string            `json:"dst"`
+	Label    string            `json:"label"`
+	Props    map[string]string `json:"props"`
+	Decl     *span             `json:"decl"`
+	Comment  *commentModel     `json:"comment"`
 }
 
 type classModel struct {
@@ -70,8 +75,8 @@ func buildModel(src string) diagramModel {
 	}
 	x := newUTF16Index(src)
 
-	for _, o := range d.topObjects() {
-		om := objectModel{ID: o.ID, Props: map[string]string{}, Refs: []span{}}
+	for _, o := range d.g.Objects {
+		om := objectModel{ID: o.AbsID(), Name: o.IDVal, Parent: o.Parent.AbsID(), Kind: objectKind(o), Props: map[string]string{}, Refs: []span{}}
 		decl := d.objectDecl(o)
 		for _, r := range o.References {
 			if r.MapKey == decl && !r.InEdge() {
@@ -92,10 +97,7 @@ func buildModel(src string) diagramModel {
 	}
 
 	for _, e := range d.g.Edges {
-		if e.Src.Parent != d.g.Root || e.Dst.Parent != d.g.Root {
-			continue
-		}
-		em := edgeModel{ID: e.AbsID(), Src: e.Src.ID, Dst: e.Dst.ID, Props: map[string]string{}}
+		em := edgeModel{ID: e.AbsID(), Sequence: sequenceOf(e.Src) != nil, Src: e.Src.AbsID(), Dst: e.Dst.AbsID(), Props: map[string]string{}}
 		if decl := edgeDecl(e); decl != nil {
 			from, to := rng(decl)
 			s := x.span(from, to)
@@ -121,6 +123,22 @@ func buildModel(src string) diagramModel {
 		}
 	}
 	return m
+}
+
+// objectKind tells the editor which controls fit: sequence diagrams have
+// actors and groups, everything else shapes and containers.
+func objectKind(o *d2graph.Object) string {
+	switch {
+	case isSequence(o):
+		return "sequence"
+	case isSequence(o.Parent) && len(o.ChildrenArray) == 0:
+		return "actor"
+	case sequenceOf(o.Parent) != nil:
+		return "group"
+	case len(o.ChildrenArray) > 0:
+		return "container"
+	}
+	return "shape"
 }
 
 func (d *doc) commentModel(x utf16Index, pos int) *commentModel {

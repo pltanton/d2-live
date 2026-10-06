@@ -26,23 +26,19 @@ func parseDoc(src string) (*doc, error) {
 	return &doc{src: src, g: g}, nil
 }
 
-func (d *doc) topObjects() []*d2graph.Object {
-	return d.g.Root.ChildrenArray
-}
-
 func (d *doc) object(id string) *d2graph.Object {
-	for _, o := range d.topObjects() {
-		if o.ID == id {
+	for _, o := range d.g.Objects {
+		if o.AbsID() == id {
 			return o
 		}
 	}
 	return nil
 }
 
-// objectFold matches the way D2 resolves ids: case-insensitively.
-func (d *doc) objectFold(id string) *d2graph.Object {
-	for _, o := range d.topObjects() {
-		if strings.EqualFold(o.ID, id) {
+// child finds parent's child by name the way D2 resolves ids: case-insensitively.
+func child(parent *d2graph.Object, name string) *d2graph.Object {
+	for _, o := range parent.ChildrenArray {
+		if strings.EqualFold(o.ID, name) || strings.EqualFold(o.IDVal, name) {
 			return o
 		}
 	}
@@ -58,18 +54,63 @@ func (d *doc) edge(id string) *d2graph.Edge {
 	return nil
 }
 
-// objectDecl is the top-level `ID` / `ID: …` key that declares o, or nil when o
-// only appears as an edge end.
+// objectDecl is the key that declares o itself (`ID`, `ID: …`, `a.ID: …`), or
+// nil when o only appears as an edge end or as a prefix of a longer path.
 func (d *doc) objectDecl(o *d2graph.Object) *d2ast.Key {
 	for _, r := range o.References {
-		if r.InEdge() || r.Scope != d.g.AST || r.MapKey.EdgeKey != nil {
+		if r.InEdge() || r.MapKey.EdgeKey != nil || r.MapKey.Key != r.Key || r.KeyPathIndex != len(r.Key.Path)-1 {
 			continue
 		}
-		if len(r.MapKey.Key.Path) == 1 {
-			return r.MapKey
+		return r.MapKey
+	}
+	return nil
+}
+
+// bodyMap is the map that holds o's children: the file for the root, else the
+// `{…}` of o's declaration (nil when o has none).
+func (d *doc) bodyMap(o *d2graph.Object) *d2ast.Map {
+	if o == d.g.Root {
+		return d.g.AST
+	}
+	if decl := d.objectDecl(o); decl != nil {
+		return decl.Value.Map
+	}
+	return nil
+}
+
+func isSequence(o *d2graph.Object) bool {
+	return o != nil && o.Shape.Value == "sequence_diagram"
+}
+
+// sequenceOf is the sequence diagram o sits in (o itself included), or nil.
+func sequenceOf(o *d2graph.Object) *d2graph.Object {
+	for ; o != nil; o = o.Parent {
+		if isSequence(o) {
+			return o
 		}
 	}
 	return nil
+}
+
+func isAncestor(a, o *d2graph.Object) bool {
+	for ; o != nil; o = o.Parent {
+		if o == a {
+			return true
+		}
+	}
+	return false
+}
+
+// relKey writes o's path relative to scope, quoting each element as needed.
+func relKey(scope, o *d2graph.Object) (string, bool) {
+	var parts []string
+	for ; o != nil && o != scope; o = o.Parent {
+		parts = append([]string{formatKey(o.IDVal)}, parts...)
+	}
+	if o != scope {
+		return "", false
+	}
+	return strings.Join(parts, "."), true
 }
 
 func edgeDecl(e *d2graph.Edge) *d2ast.Key {
@@ -153,22 +194,29 @@ func indentOf(src string, pos int) string {
 }
 
 // commentLines holds the start offset of every line that is nothing but a `#`
-// comment in the top-level map. The parser folds consecutive comment lines into
-// one node, so each node can cover several lines.
+// comment, in any map. The parser folds consecutive comment lines into one
+// node, so each node can cover several lines.
 func (d *doc) commentLines() map[int]bool {
 	out := map[int]bool{}
-	for _, n := range d.g.AST.Nodes {
-		if n.Comment == nil {
-			continue
-		}
-		start, end := rng(n.Comment)
-		if !isBlank(d.src[lineStart(d.src, start):start]) {
-			continue
-		}
-		for ls := lineStart(d.src, start); ls < end; ls = lineEnd(d.src, ls) {
-			out[ls] = true
+	var walk func(m *d2ast.Map)
+	walk = func(m *d2ast.Map) {
+		for _, n := range m.Nodes {
+			if n.MapKey != nil && n.MapKey.Value.Map != nil {
+				walk(n.MapKey.Value.Map)
+			}
+			if n.Comment == nil {
+				continue
+			}
+			start, end := rng(n.Comment)
+			if !isBlank(d.src[lineStart(d.src, start):start]) {
+				continue
+			}
+			for ls := lineStart(d.src, start); ls < end; ls = lineEnd(d.src, ls) {
+				out[ls] = true
+			}
 		}
 	}
+	walk(d.g.AST)
 	return out
 }
 
