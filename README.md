@@ -26,7 +26,7 @@ On NixOS or home-manager, add the flake as an input and the package to your pack
 ```nix
 inputs.d2-live.url = "github:pltanton/d2-live";
 # …
-environment.systemPackages = [ inputs.d2-live.packages.${pkgs.system}.default ];
+environment.systemPackages = [ inputs.d2-live.packages.${pkgs.stdenv.hostPlatform.system}.default ];
 ```
 
 Anywhere else, with Go 1.25 or newer:
