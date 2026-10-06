@@ -1,7 +1,7 @@
 import {
   EditorState, StateField, StateEffect, Annotation, Transaction,
   EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, Decoration,
-  WidgetType, drawSelection, highlightSpecialChars,
+  WidgetType, drawSelection, highlightSpecialChars, gutter, GutterMarker,
   defaultKeymap, history, historyKeymap, indentWithTab,
   bracketMatching, indentOnInput, searchKeymap, highlightSelectionMatches,
   closeBrackets, closeBracketsKeymap,
@@ -57,6 +57,38 @@ const flashField = StateField.define({
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
 });
 
+class WrapMarker extends GutterMarker {
+  constructor(rows, rowHeight) {
+    super();
+    this.rows = rows;
+    this.rowHeight = rowHeight;
+  }
+  eq(other) {
+    return other.rows === this.rows && other.rowHeight === this.rowHeight;
+  }
+  toDOM() {
+    const el = document.createElement('div');
+    el.className = 'cm-d2l-wrapmarks';
+    for (let i = 0; i < this.rows; i++) {
+      const row = document.createElement('div');
+      row.style.height = this.rowHeight + 'px';
+      row.textContent = i ? '↪' : '';
+      el.appendChild(row);
+    }
+    return el;
+  }
+}
+
+const wrapGutter = gutter({
+  class: 'cm-d2l-wrap-gutter',
+  lineMarker(view, line) {
+    const rowHeight = view.defaultLineHeight;
+    const rows = Math.round(line.height / rowHeight);
+    return rows > 1 ? new WrapMarker(rows, rowHeight) : null;
+  },
+  lineMarkerChange: (update) => update.geometryChanged,
+});
+
 const setMarks = StateEffect.define();
 
 const marksField = StateField.define({
@@ -91,6 +123,9 @@ const theme = EditorView.theme({
   '.cm-content': {caretColor: '#c4a7e7', padding: '8px 0'},
   '.cm-cursor': {borderLeftColor: '#c4a7e7', borderLeftWidth: '2px'},
   '.cm-gutters': {backgroundColor: 'transparent', color: '#6e6a86', border: 'none'},
+  '.cm-d2l-wrap-gutter .cm-gutterElement': {padding: '0 2px 0 0', minWidth: '12px', color: '#c4a7e7', textAlign: 'right'},
+  '.cm-d2l-wrapmarks > div': {fontSize: '11px', opacity: '0.75', display: 'flex', alignItems: 'center', justifyContent: 'flex-end'},
+  '.cm-lineWrapping > .cm-line': {paddingLeft: 'calc(6px + 2ch)', textIndent: '-2ch'},
   '.cm-activeLine': {backgroundColor: 'rgba(224, 222, 244, 0.04)'},
   '.cm-activeLineGutter': {backgroundColor: 'transparent', color: '#e0def4'},
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {backgroundColor: 'rgba(196, 167, 231, 0.28) !important'},
@@ -102,7 +137,7 @@ const theme = EditorView.theme({
 
 export function createEditor(parent, {onDocChange, onCursor}) {
   const extensions = [
-    lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
+    lineNumbers(), wrapGutter, highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
     indentOnInput(), bracketMatching(), closeBrackets(), highlightActiveLine(), highlightSelectionMatches(),
     keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, indentWithTab]),
     d2Language, d2Highlight, flashField, marksField, theme, EditorView.lineWrapping,
