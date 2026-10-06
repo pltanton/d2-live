@@ -247,9 +247,10 @@ downloadPngButton.addEventListener('click', downloadPng);
 
 async function reloadSvg() {
   try {
-    const response = await fetch('/svg?' + query('ts=' + Date.now()));
+    const response = await fetch('/svg?' + query('ts=' + Date.now() + (state.edit ? '&edit=1' : '')));
     const svg = await response.text();
     scene.innerHTML = svg;
+    document.dispatchEvent(new CustomEvent('d2l:svg', {detail: {error: response.headers.get('X-D2-Error')}}));
   } catch (err) {
     showToast('update failed');
   }
@@ -267,6 +268,11 @@ function updateURL() {
   u.searchParams.set('file', state.file);
   u.searchParams.set('sketch', state.sketch);
   u.searchParams.set('layout', state.layout);
+  if (state.edit) {
+    u.searchParams.set('edit', '1');
+  } else {
+    u.searchParams.delete('edit');
+  }
   history.replaceState(null, '', u);
 }
 
@@ -281,6 +287,9 @@ function connect() {
       reloadSvg();
     }
   };
+  events.addEventListener('source', (event) => {
+    document.dispatchEvent(new CustomEvent('d2l:source', {detail: JSON.parse(event.data)}));
+  });
   events.onopen = () => {
     setConnected('connected');
   };
@@ -300,6 +309,7 @@ function applyState(next, fileChanged) {
   reloadSvg().then(() => applyTransform(target));
   if (fileChanged) {
     connect();
+    document.dispatchEvent(new CustomEvent('d2l:file'));
   }
 }
 
@@ -334,6 +344,50 @@ sketchToggle.addEventListener('change', (event) => {
   applyState({sketch: event.target.checked}, false);
 });
 
+const editToggle = document.getElementById('edit-toggle');
+let editModule = null;
+
+async function setEditing(on) {
+  state.edit = on;
+  updateURL();
+  document.body.classList.toggle('editing', on);
+  if (on) {
+    try {
+      editModule = editModule || await import('/ui/edit.js');
+      await editModule.enable(window.d2live);
+    } catch (err) {
+      console.error(err);
+      showToast('edit mode failed to load');
+      document.body.classList.remove('editing');
+      state.edit = false;
+      updateURL();
+      return;
+    }
+  } else if (editModule) {
+    editModule.disable();
+  }
+  reloadSvg();
+}
+
+function typingTarget(el) {
+  return el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('.cm-editor'));
+}
+
+editToggle.addEventListener('click', () => setEditing(!state.edit));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'e' && !event.metaKey && !event.ctrlKey && !event.altKey && !typingTarget(event.target)) {
+    event.preventDefault();
+    setEditing(!state.edit);
+  }
+});
+
+window.d2live = {
+  state, viewer, scene, panzoom: instance, showToast, reloadSvg, setEditing, typingTarget,
+};
+
 setConnected('connecting');
 saveState();
 connect();
+if (new URLSearchParams(location.search).get('edit') === '1') {
+  setEditing(true);
+}

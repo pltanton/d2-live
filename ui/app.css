@@ -373,3 +373,37 @@ body.editing #viewer {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+#edit-toggle {
+  position: fixed;
+  right: 20px;
+  top: 20px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px 9px 12px;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: transform 160ms var(--spring), background 160ms var(--emph);
+}
+#edit-toggle:hover {
+  background: var(--surface-3);
+}
+#edit-toggle:active {
+  transform: scale(0.96);
+}
+#edit-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--primary);
+}
+body.editing #edit-toggle {
+  display: none;
+}
