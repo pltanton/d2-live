@@ -1,9 +1,9 @@
 {buildGoModule}:
 buildGoModule {
   pname = "d2-live";
-  version = "0.3.2";
+  version = "0.3.3";
   src = ./.;
-  vendorHash = "sha256-ujQhLKtMwKBY+ZHFPpjX9d5HclKgQs95W0CGZJnQjxA=";
+  vendorHash = "sha256-vUZxAk8yBqmBQFh8n7r+vP/18U/e2g7VGO47lGlYtCM=";
   doCheck = false;
   meta.mainProgram = "d2-live";
 }
