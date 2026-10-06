@@ -1,3 +1,5 @@
+import { icon } from './icons.js';
+
 const SHAPES = ['', 'rectangle', 'square', 'oval', 'circle', 'diamond', 'hexagon', 'parallelogram', 'cylinder',
   'queue', 'page', 'document', 'package', 'step', 'callout', 'stored_data', 'person', 'cloud', 'text'];
 
@@ -153,7 +155,7 @@ export function renderInspector(root, ctx) {
         h('button', {type: 'button', class: 'd2l-link', onclick: () => ctx.select({kind: 'object', id: item.src})}, item.src),
         h('span', {}, '→'),
         h('button', {type: 'button', class: 'd2l-link', onclick: () => ctx.select({kind: 'object', id: item.dst})}, item.dst),
-        h('button', {type: 'button', class: 'd2l-ghost-btn', title: 'Reverse', onclick: () => ctx.op({kind: 'reverse', id: item.id})}, '⇄')),
+        h('button', {type: 'button', class: 'd2l-ghost-btn', title: 'Reverse', onclick: () => ctx.op({kind: 'reverse', id: item.id})}, icon('swap'))),
       field('Label', textArea(item.label, set('label'), {placeholder: 'event or action', 'data-focus': 'id'}), 'label'),
       field('Class', classSelect(item.props.class), 'class'),
       styleSection(EDGE_STYLE, item.props, hasStyle(item.props)),

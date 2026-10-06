@@ -71,8 +71,24 @@ function setConnected(status) {
 }
 
 let toastTimer = null;
+// Client-side PNGs take milliseconds; the loader only shows for the slow server
+// fallback, and then long enough not to flicker.
+let pngLoaderTimer = null;
+let pngLoaderShownAt = 0;
 function setPngLoading(loading) {
-  pngLoader.classList.toggle('visible', loading);
+  clearTimeout(pngLoaderTimer);
+  if (loading) {
+    pngLoaderTimer = setTimeout(() => {
+      pngLoaderShownAt = Date.now();
+      pngLoader.classList.add('visible');
+    }, 250);
+    return;
+  }
+  const left = pngLoaderShownAt ? 400 - (Date.now() - pngLoaderShownAt) : 0;
+  pngLoaderTimer = setTimeout(() => {
+    pngLoaderShownAt = 0;
+    pngLoader.classList.remove('visible');
+  }, Math.max(0, left));
 }
 
 function showToast(message) {
@@ -211,7 +227,34 @@ function currentPngName() {
   return baseName().replace(/\.[^.]+$/, '') + '.png';
 }
 
+// Rasterises the SVG already on screen; browsers that taint a canvas drawn from
+// an SVG with foreignObject (markdown labels) fall back to the server's d2 export.
+async function svgToPng(svgText, scale) {
+  const box = new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement.viewBox.baseVal;
+  const url = URL.createObjectURL(new Blob([svgText], {type: 'image/svg+xml'}));
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(box.width * scale);
+    canvas.height = Math.round(box.height * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('empty'))), 'image/png'));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function fetchPngBlob() {
+  const svgText = currentSvgText();
+  if (svgText) {
+    try {
+      return await svgToPng(svgText, 2);
+    } catch (err) {
+      // fall through to the server
+    }
+  }
   const response = await fetch('/png?' + query('ts=' + Date.now()));
   if (!response.ok) {
     throw new Error('png fetch failed');

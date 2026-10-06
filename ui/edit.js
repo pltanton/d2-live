@@ -2,6 +2,7 @@ import { createEditor } from './editor.js';
 import { createOverlay } from './overlay.js';
 import { renderInspector, classFill } from './inspector.js';
 import { undo, redo, undoDepth, redoDepth } from './vendor/codemirror.js';
+import { icon } from './icons.js';
 
 const PREVIEW_MS = 200;
 const MODEL_MS = 120;
@@ -99,13 +100,13 @@ function build() {
       h('button', {type: 'button', class: 'd2l-save', title: 'Save to file (⌘S)', onclick: () => save()}, 'Save'),
       h('button', {type: 'button', class: 'd2l-close', title: 'Leave edit mode (E)', onclick: () => api.setEditing(false)}, '✕')),
     banner, code, error, inspectorBox);
-  const undoBtn = h('button', {type: 'button', title: 'Undo (⌘Z)', class: 'd2l-icon', onclick: () => history(undo)}, '↶');
-  const redoBtn = h('button', {type: 'button', title: 'Redo (⇧⌘Z)', class: 'd2l-icon', onclick: () => history(redo)}, '↷');
+  const undoBtn = h('button', {type: 'button', title: 'Undo (⌘Z)', class: 'd2l-icon', onclick: () => history(undo)}, icon('undo'));
+  const redoBtn = h('button', {type: 'button', title: 'Redo (⇧⌘Z)', class: 'd2l-icon', onclick: () => history(redo)}, icon('redo'));
   const toolbar = h('div', {id: 'd2l-toolbar'},
     undoBtn, redoBtn, h('span', {class: 'd2l-sep'}),
-    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, h('b', {}, '+'), ' State'),
+    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, icon('plus'), ' State'),
     h('span', {class: 'd2l-sep'}),
-    h('button', {type: 'button', title: 'Fit to screen (F)', class: 'd2l-icon', onclick: () => api.fitView()}, '⤢'));
+    h('button', {type: 'button', title: 'Fit to screen (F)', class: 'd2l-icon', onclick: () => api.fitView()}, icon('fit')));
   const hint = h('div', {id: 'd2l-hint', hidden: ''});
   const rendering = h('div', {id: 'd2l-rendering', hidden: ''}, h('span', {class: 'd2l-spinner'}), 'Rendering…');
   document.body.append(panel, toolbar, hint, rendering);
@@ -499,18 +500,18 @@ function miniButtons(sel, item) {
   };
   if (sel.kind === 'object') {
     return [
-      btn('✎', 'Rename (Enter)', focusField),
+      btn(icon('pencil'), 'Rename (Enter)', focusField),
       classPick(),
-      btn('→', 'Connect to another state (C)', () => toggleConnect()),
-      btn('⌫', 'Delete', removeSelected, 'd2l-danger-btn'),
+      btn(icon('arrow'), 'Connect to another state (C)', () => toggleConnect()),
+      btn(icon('trash'), 'Delete (⌫)', removeSelected, 'd2l-danger-btn'),
     ];
   }
   if (sel.kind === 'edge') {
     return [
-      btn('✎', 'Edit label (Enter)', focusField),
+      btn(icon('pencil'), 'Edit label (Enter)', focusField),
       classPick(),
-      btn('⇄', 'Reverse', () => runOp({kind: 'reverse', id: sel.id})),
-      btn('⌫', 'Delete', removeSelected, 'd2l-danger-btn'),
+      btn(icon('swap'), 'Reverse', () => runOp({kind: 'reverse', id: sel.id})),
+      btn(icon('trash'), 'Delete (⌫)', removeSelected, 'd2l-danger-btn'),
     ];
   }
   return null;
