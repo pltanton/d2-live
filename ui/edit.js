@@ -94,7 +94,9 @@ function build() {
   const redoBtn = h('button', {type: 'button', title: 'Redo (⇧⌘Z)', class: 'd2l-icon', onclick: () => history(redo)}, '↷');
   const toolbar = h('div', {id: 'd2l-toolbar'},
     undoBtn, redoBtn, h('span', {class: 'd2l-sep'}),
-    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, h('b', {}, '+'), ' State'));
+    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, h('b', {}, '+'), ' State'),
+    h('span', {class: 'd2l-sep'}),
+    h('button', {type: 'button', title: 'Fit to screen (F)', class: 'd2l-icon', onclick: () => api.fitView()}, '⤢'));
   const hint = h('div', {id: 'd2l-hint', hidden: ''});
   const rendering = h('div', {id: 'd2l-rendering', hidden: ''}, h('span', {class: 'd2l-spinner'}), 'Rendering…');
   document.body.append(panel, toolbar, hint, rendering);

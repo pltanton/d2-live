@@ -191,6 +191,7 @@ function emptyState(ctx) {
       h('div', {}, h('kbd', {}, 'C'), ' connect from selected'),
       h('div', {}, h('kbd', {}, '⌫'), ' delete'),
       h('div', {}, h('kbd', {}, '⌘Z'), ' undo'),
+      h('div', {}, h('kbd', {}, 'F'), ' fit to screen'),
       h('div', {}, h('kbd', {}, 'E'), ' leave edit mode')),
     model.classes.length ? h('div', {class: 'd2l-classes'},
       h('div', {class: 'd2l-label'}, 'Classes'),

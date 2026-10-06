@@ -30,11 +30,7 @@ function baseName() {
   return parts[parts.length - 1] || state.file;
 }
 
-const saved = loadState();
 const instance = panzoom(scene, {
-  initialX: saved ? saved.x : 0,
-  initialY: saved ? saved.y : 0,
-  initialZoom: saved ? saved.scale : 1,
   bounds: false,
   smoothScroll: false,
   transformOrigin: {x: 0.5, y: 0.5},
@@ -350,13 +346,36 @@ function connect() {
   };
 }
 
+function fitView() {
+  const svg = scene.querySelector('svg');
+  if (!svg) {
+    return;
+  }
+  const t = instance.getTransform();
+  const v = viewer.getBoundingClientRect();
+  const r = svg.getBoundingClientRect();
+  const w = r.width / t.scale;
+  const h = r.height / t.scale;
+  if (!w || !h) {
+    return;
+  }
+  const ox = (r.left - v.left - t.x) / t.scale;
+  const oy = (r.top - v.top - t.y) / t.scale;
+  const top = state.edit ? 64 : 16;
+  const margin = 16;
+  const s = Math.min((v.width - 2 * margin) / w, (v.height - top - margin) / h);
+  instance.zoomAbs(0, 0, s);
+  instance.moveTo((v.width - w * s) / 2 - ox * s, top + (v.height - top - margin - h * s) / 2 - oy * s);
+  saveState();
+}
+
 function applyState(next, fileChanged) {
   saveState();
   Object.assign(state, next);
   updateURL();
   refreshTitle();
-  const target = loadState();
-  reloadSvg().then(() => applyTransform(target));
+  const target = fileChanged ? null : loadState();
+  reloadSvg().then(() => (target ? applyTransform(target) : fitView()));
   if (fileChanged) {
     connect();
     document.dispatchEvent(new CustomEvent('d2l:file'));
@@ -416,7 +435,8 @@ async function setEditing(on) {
   } else if (editModule) {
     editModule.disable();
   }
-  reloadSvg();
+  await reloadSvg();
+  fitView();
 }
 
 function typingTarget(el) {
@@ -425,14 +445,20 @@ function typingTarget(el) {
 
 editToggle.addEventListener('click', () => setEditing(!state.edit));
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'e' && !event.metaKey && !event.ctrlKey && !event.altKey && !typingTarget(event.target)) {
+  if (event.metaKey || event.ctrlKey || event.altKey || typingTarget(event.target)) {
+    return;
+  }
+  if (event.key === 'e') {
     event.preventDefault();
     setEditing(!state.edit);
+  } else if (event.key === 'f') {
+    event.preventDefault();
+    fitView();
   }
 });
 
 window.d2live = {
-  state, viewer, scene, panzoom: instance, showToast, reloadSvg, setEditing, typingTarget,
+  state, viewer, scene, panzoom: instance, showToast, reloadSvg, setEditing, typingTarget, fitView,
 };
 
 prepareSnapshot(scene.innerHTML);
@@ -441,4 +467,6 @@ saveState();
 connect();
 if (new URLSearchParams(location.search).get('edit') === '1') {
   setEditing(true);
+} else {
+  requestAnimationFrame(fitView);
 }
