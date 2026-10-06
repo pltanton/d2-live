@@ -127,8 +127,8 @@ body.editing #viewer {
   border-top: 1px solid var(--surface-2);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  font-size: 12.5px;
+  gap: 8px;
+  font-size: 12px;
 }
 .d2l-inspector:empty {
   display: none;
@@ -231,8 +231,8 @@ body.editing #viewer {
   border-radius: 10px;
   background: var(--surface-2);
   color: var(--text);
-  font: 12.5px ui-monospace, "SF Mono", Menlo, monospace;
-  padding: 7px 10px;
+  font: 11.5px ui-monospace, "SF Mono", Menlo, monospace;
+  padding: 6px 9px;
   outline: none;
   transition: border-color 140ms var(--emph), background 140ms var(--emph);
 }
@@ -468,30 +468,59 @@ body.editing #viewer {
   background: color-mix(in srgb, var(--love) 26%, transparent);
   color: var(--love);
 }
-.d2l-mini-class {
-  position: relative;
+.d2l-mini > .d2l-mini-class {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px 0 9px;
+  width: auto;
   height: 30px;
+  padding: 0 10px 0 9px;
   border-radius: var(--r-pill);
   background: var(--surface-2);
-  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
 }
-.d2l-mini-class select {
-  appearance: none;
+.d2l-mini > .d2l-mini-class:hover {
+  background: var(--surface-3);
+}
+.d2l-caret {
+  color: var(--muted);
+  font-size: 10px;
+}
+.d2l-mini-class .d2l-swatch {
+  background: var(--sw, transparent);
+}
+.d2l-menu {
+  position: fixed;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 5px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.d2l-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border: none;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 9px;
   cursor: pointer;
-  outline: none;
 }
-.d2l-mini-class .d2l-swatch {
-  background: var(--sw, transparent);
+.d2l-menu button:hover {
+  background: var(--surface-2);
+}
+.d2l-menu button.d2l-current {
+  color: var(--primary);
 }
 .d2l-handle {
   position: absolute;
@@ -544,4 +573,71 @@ body.editing #viewer {
 }
 body.editing #scene g[class] {
   cursor: pointer;
+}
+
+#d2l-toolbar .d2l-icon {
+  font-size: 16px;
+  padding: 5px 10px;
+  line-height: 1;
+}
+#d2l-toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: transparent;
+}
+#d2l-toolbar button.d2l-on {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+#d2l-toolbar button.d2l-on b {
+  color: var(--on-primary);
+}
+.d2l-sep {
+  width: 1px;
+  margin: 6px 4px;
+  background: var(--surface-3);
+}
+#d2l-hint, #d2l-rendering {
+  position: fixed;
+  top: 66px;
+  left: calc((100vw - var(--d2l-panel-w)) / 2);
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 7px 14px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+#d2l-hint {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+#d2l-rendering {
+  top: auto;
+  bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--surface);
+  color: var(--text);
+}
+#d2l-hint[hidden], #d2l-rendering[hidden] {
+  display: none;
+}
+.d2l-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--primary) 26%, transparent);
+  border-top-color: var(--primary);
+  animation: spin 0.8s linear infinite;
+}
+body.d2l-pending #scene {
+  opacity: 0.55;
+  transition: opacity 180ms var(--emph) 120ms;
+}
+#scene {
+  transition: opacity 160ms var(--emph);
 }

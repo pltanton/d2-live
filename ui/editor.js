@@ -86,9 +86,9 @@ const marksField = StateField.define({
 });
 
 const theme = EditorView.theme({
-  '&': {height: '100%', fontSize: '12.5px', color: '#e0def4', backgroundColor: 'transparent'},
-  '.cm-scroller': {fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace', lineHeight: '1.6'},
-  '.cm-content': {caretColor: '#c4a7e7', padding: '10px 0'},
+  '&': {height: '100%', fontSize: '11.5px', color: '#e0def4', backgroundColor: 'transparent'},
+  '.cm-scroller': {fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace', lineHeight: '1.45'},
+  '.cm-content': {caretColor: '#c4a7e7', padding: '8px 0'},
   '.cm-cursor': {borderLeftColor: '#c4a7e7', borderLeftWidth: '2px'},
   '.cm-gutters': {backgroundColor: 'transparent', color: '#6e6a86', border: 'none'},
   '.cm-activeLine': {backgroundColor: 'rgba(224, 222, 244, 0.04)'},

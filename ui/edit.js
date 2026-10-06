@@ -1,11 +1,12 @@
 import { createEditor } from './editor.js';
 import { createOverlay } from './overlay.js';
 import { renderInspector, classFill } from './inspector.js';
-import { undo, redo } from './vendor/codemirror.js';
+import { undo, redo, undoDepth, redoDepth } from './vendor/codemirror.js';
 
 const AUTOSAVE_MS = 300;
 const MODEL_MS = 120;
 const PANEL_KEY = 'd2-live:panel-width';
+const RENDER_TIMEOUT_MS = 10000;
 
 let api = null;
 let ui = null;
@@ -28,6 +29,8 @@ const st = {
   connect: null,
   down: null,
   active: false,
+  renderTimer: null,
+  reveal: null,
 };
 
 export async function enable(d2live) {
@@ -37,6 +40,7 @@ export async function enable(d2live) {
   ui.panel.hidden = false;
   ui.toolbar.hidden = false;
   overlay.root.hidden = false;
+  syncHistoryButtons();
   await loadSource();
 }
 
@@ -48,6 +52,7 @@ export function disable() {
   ui.panel.hidden = true;
   ui.toolbar.hidden = true;
   overlay.root.hidden = true;
+  setRendering(false);
 }
 
 function h(tag, attrs = {}, ...children) {
@@ -79,12 +84,15 @@ function build() {
       status,
       h('button', {type: 'button', class: 'd2l-close', title: 'Leave edit mode (E)', onclick: () => api.setEditing(false)}, '✕')),
     banner, code, error, inspector);
+  const undoBtn = h('button', {type: 'button', title: 'Undo (⌘Z)', class: 'd2l-icon', onclick: () => history(undo)}, '↶');
+  const redoBtn = h('button', {type: 'button', title: 'Redo (⇧⌘Z)', class: 'd2l-icon', onclick: () => history(redo)}, '↷');
   const toolbar = h('div', {id: 'd2l-toolbar'},
-    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, h('b', {}, '+'), ' State'),
-    h('button', {type: 'button', title: 'Connect from the selected state (C)', onclick: () => startConnect(false)}, h('b', {}, '→'), ' Connect'),
-    h('button', {type: 'button', title: 'Delete selected (⌫)', onclick: removeSelected}, h('b', {}, '⌫'), ' Delete'));
-  document.body.append(panel, toolbar);
-  ui = {panel, status, banner, code, error, inspector, toolbar};
+    undoBtn, redoBtn, h('span', {class: 'd2l-sep'}),
+    h('button', {type: 'button', title: 'New state (N)', onclick: createNode}, h('b', {}, '+'), ' State'));
+  const hint = h('div', {id: 'd2l-hint', hidden: ''});
+  const rendering = h('div', {id: 'd2l-rendering', hidden: ''}, h('span', {class: 'd2l-spinner'}), 'Rendering…');
+  document.body.append(panel, toolbar, hint, rendering);
+  ui = {panel, status, banner, code, error, inspector, toolbar, undoBtn, redoBtn, hint, rendering};
 
   try {
     const w = parseInt(localStorage.getItem(PANEL_KEY), 10);
@@ -93,10 +101,13 @@ function build() {
   resizer.addEventListener('pointerdown', startResize);
 
   ed = createEditor(code, {onDocChange, onCursor});
-  overlay = createOverlay(api.viewer, {onHandleDown});
+  overlay = createOverlay(api.viewer, api.panzoom, {onHandleDown});
 
-  api.panzoom.on('transform', () => overlay.update());
-  window.addEventListener('resize', () => overlay.update());
+  api.panzoom.on('transform', () => {
+    closeClassMenu();
+    overlay.schedule();
+  });
+  window.addEventListener('resize', () => overlay.measure());
   document.addEventListener('d2l:svg', onSvg);
   document.addEventListener('d2l:source', (e) => onSource(e.detail));
   document.addEventListener('d2l:file', () => st.active && loadSource());
@@ -106,7 +117,7 @@ function build() {
   api.scene.addEventListener('click', onSceneClick);
   api.scene.addEventListener('dblclick', onSceneDblClick);
   api.scene.addEventListener('pointerover', (e) => {
-    if (!st.active) return;
+    if (!st.active || e.buttons) return;
     const hit = hitTest(e.target);
     overlay.hover(hit && hit.g, hit && hit.kind);
   });
@@ -117,7 +128,7 @@ function startResize(e) {
   const move = (ev) => {
     const w = Math.min(Math.max(window.innerWidth - ev.clientX, 320), window.innerWidth - 240);
     document.documentElement.style.setProperty('--d2l-panel-w', w + 'px');
-    overlay.update();
+    overlay.measure();
   };
   const up = (ev) => {
     window.removeEventListener('pointermove', move);
@@ -150,6 +161,7 @@ async function loadSource() {
 
 function onDocChange(text, programmatic) {
   scheduleModel();
+  syncHistoryButtons();
   if (text === st.disk.text) {
     setStatus('saved');
     return;
@@ -174,6 +186,7 @@ async function save() {
   const text = ed.text();
   if (text === st.disk.text || st.theirs) return;
   setStatus('saving');
+  setRendering(true);
   st.saving = (async () => {
     try {
       const res = await fetch('/source', {
@@ -183,6 +196,7 @@ async function save() {
       });
       const body = await res.json().catch(() => ({}));
       if (res.status === 409) {
+        setRendering(false);
         showBanner({text: body.text, hash: body.hash});
         return;
       }
@@ -190,6 +204,7 @@ async function save() {
       st.disk = {text, hash: body.hash};
       setStatus(ed.text() === text ? 'saved' : 'dirty');
     } catch (err) {
+      setRendering(false);
       setStatus('error');
       api.showToast('save failed');
     }
@@ -212,6 +227,7 @@ function onSource({text, hash}) {
     st.disk = {text, hash};
     ed.replace(text);
     setStatus('saved');
+    setRendering(true);
     return;
   }
   showBanner({text, hash});
@@ -304,10 +320,45 @@ function decodeId(token) {
   }
 }
 
-function onSvg() {
+function onSvg(e) {
   if (!st.active) return;
+  if (!e.detail.hash || e.detail.hash === st.disk.hash) setRendering(false);
   indexSvg();
   applySelection({scroll: false, inspector: false});
+  if (st.reveal) {
+    revealInView(st.gById.get(st.reveal));
+    st.reveal = null;
+  }
+}
+
+function setRendering(on) {
+  clearTimeout(st.renderTimer);
+  ui.rendering.hidden = !on;
+  document.body.classList.toggle('d2l-pending', on);
+  if (on) st.renderTimer = setTimeout(() => setRendering(false), RENDER_TIMEOUT_MS);
+}
+
+function revealInView(g) {
+  if (!g) return;
+  const v = api.viewer.getBoundingClientRect();
+  const r = g.getBoundingClientRect();
+  const margin = 60;
+  if (r.left >= v.left + margin && r.right <= v.right - margin && r.top >= v.top + margin && r.bottom <= v.bottom - margin) return;
+  const t = api.panzoom.getTransform();
+  const dx = (v.left + v.width / 2) - (r.left + r.width / 2);
+  const dy = (v.top + v.height / 2) - (r.top + r.height / 2);
+  api.panzoom.smoothMoveTo(t.x + dx, t.y + dy);
+}
+
+function syncHistoryButtons() {
+  if (!ui || !ed) return;
+  ui.undoBtn.disabled = undoDepth(ed.view.state) === 0;
+  ui.redoBtn.disabled = redoDepth(ed.view.state) === 0;
+}
+
+function history(cmd) {
+  cmd(ed.view);
+  syncHistoryButtons();
 }
 
 function indexSvg() {
@@ -346,6 +397,7 @@ function hitTest(target) {
 // ---- selection ----
 
 function select(sel, {scroll = true} = {}) {
+  closeClassMenu();
   st.sel = sel;
   st.errors = {};
   applySelection({scroll, inspector: true});
@@ -387,13 +439,13 @@ function miniButtons(sel, item) {
   const btn = (label, title, onclick, cls = '') => h('button', {type: 'button', title, class: cls, onclick}, label);
   const classPick = () => {
     const current = item.props.class || '';
-    const s = h('select', {title: 'Class'},
-      h('option', {value: ''}, '— no class'),
-      ...st.model.classes.map((c) => h('option', {value: c.name}, c.name)));
-    s.value = current;
-    s.addEventListener('change', () => runOp({kind: 'set', id: sel.id, key: 'class', value: s.value || null}, 'class'));
-    return h('label', {class: 'd2l-mini-class', style: `--sw: ${classFill(st.model, current) || 'transparent'}`},
-      h('span', {class: 'd2l-swatch'}), s);
+    const pill = h('button', {type: 'button', title: 'Class', class: 'd2l-mini-class', style: `--sw: ${classFill(st.model, current) || 'transparent'}`},
+      h('span', {class: 'd2l-swatch'}), current || 'no class', h('span', {class: 'd2l-caret'}, '▾'));
+    pill.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openClassMenu(pill, current, (value) => runOp({kind: 'set', id: sel.id, key: 'class', value}, 'class'));
+    });
+    return pill;
   };
   const focusField = () => {
     const f = ui.inspector.querySelector('[data-focus="id"]');
@@ -406,7 +458,7 @@ function miniButtons(sel, item) {
     return [
       btn('✎', 'Rename (Enter)', focusField),
       classPick(),
-      btn('→', 'Connect (C)', () => startConnect(false)),
+      btn('→', 'Connect to another state (C)', () => toggleConnect()),
       btn('⌫', 'Delete', removeSelected, 'd2l-danger-btn'),
     ];
   }
@@ -419,6 +471,35 @@ function miniButtons(sel, item) {
     ];
   }
   return null;
+}
+
+let classMenu = null;
+
+function closeClassMenu() {
+  if (classMenu) {
+    classMenu.remove();
+    classMenu = null;
+  }
+}
+
+function openClassMenu(anchor, current, pick) {
+  if (classMenu) {
+    closeClassMenu();
+    return;
+  }
+  const choose = (value) => () => {
+    closeClassMenu();
+    if (value !== current) pick(value || null);
+  };
+  const r = anchor.getBoundingClientRect();
+  classMenu = h('div', {class: 'd2l-menu', style: `left: ${Math.round(r.left)}px; top: ${Math.round(r.bottom + 6)}px`},
+    ...st.model.classes.map((c) => h('button', {type: 'button', class: c.name === current ? 'd2l-current' : '', onclick: choose(c.name)},
+      h('span', {class: 'd2l-swatch', style: `--sw: ${classFill(st.model, c.name) || 'transparent'}`}), c.name)),
+    h('button', {type: 'button', class: current ? '' : 'd2l-current', onclick: choose('')}, h('span', {class: 'd2l-swatch'}), 'no class'));
+  document.body.append(classMenu);
+  setTimeout(() => document.addEventListener('pointerdown', (e) => {
+    if (classMenu && !classMenu.contains(e.target)) closeClassMenu();
+  }, {once: true}), 0);
 }
 
 function onCursor(pos) {
@@ -460,6 +541,12 @@ async function runOp(op, field) {
   if (op.kind === 'set' && op.key === 'class' && op.value && st.sel) st.lastClass[st.sel.kind] = op.value;
   ed.replace(body.text);
   await refreshModel();
+  const target = body.select || (op.kind !== 'delete' && st.sel && st.sel.id);
+  if (target) st.reveal = target;
+  if (!op.kind.startsWith('create') && ui.inspector.contains(document.activeElement)) {
+    document.activeElement.blur();
+    api.viewer.focus({preventScroll: true});
+  }
   if (body.select) {
     select({kind: kindOf(body.select), id: body.select}, {scroll: true});
   } else if (op.kind === 'delete') {
@@ -515,6 +602,11 @@ function removeSelected() {
 
 // ---- connecting ----
 
+function toggleConnect() {
+  if (st.connect) cancelConnect();
+  else startConnect(false);
+}
+
 function startConnect(drag, e) {
   if (!st.sel || st.sel.kind !== 'object') {
     api.showToast('select a state first');
@@ -522,6 +614,10 @@ function startConnect(drag, e) {
   }
   st.connect = {src: st.sel.id, drag, x: e ? e.clientX : 0, y: e ? e.clientY : 0, moved: false};
   api.viewer.classList.add('d2l-connecting');
+  ui.hint.hidden = false;
+  ui.hint.textContent = drag
+    ? 'Drop on a state to connect · on empty canvas for a new one'
+    : `From ${st.sel.id}: click a state to connect · empty canvas for a new state · Esc to cancel`;
   if (e) overlay.bandFrom(st.gById.get(st.sel.id), e.clientX, e.clientY);
 }
 
@@ -529,6 +625,9 @@ function cancelConnect() {
   st.connect = null;
   if (api) api.viewer.classList.remove('d2l-connecting');
   if (overlay) overlay.bandFrom(null);
+  if (ui) {
+    ui.hint.hidden = true;
+  }
 }
 
 function onPointerMove(e) {
@@ -590,7 +689,7 @@ function onKey(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === 'z') {
     e.preventDefault();
-    (e.shiftKey ? redo : undo)(ed.view);
+    history(e.shiftKey ? redo : undo);
     return;
   }
   if (mod || e.altKey) return;
@@ -603,7 +702,7 @@ function onKey(e) {
     case 'c':
     case 'C':
       e.preventDefault();
-      startConnect(false);
+      toggleConnect();
       break;
     case 'Delete':
     case 'Backspace':

@@ -57,11 +57,12 @@ type server struct {
 
 	mu          sync.Mutex
 	files       map[string]*fileEntry
-	cache       map[string]string
+	cache       map[string]rendered
 	watchedDirs map[string]int
 	debounce    map[string]*time.Timer
 	seen        map[string]string
 	lastGood    map[string]string
+	inflight    map[string]*flight
 
 	// writeMu serialises PUT /source so the stale check and the write are atomic.
 	writeMu sync.Mutex
@@ -635,11 +636,12 @@ func newServer(layout string, idle time.Duration) *server {
 		idle:        idle,
 		watcher:     watcher,
 		files:       map[string]*fileEntry{},
-		cache:       map[string]string{},
+		cache:       map[string]rendered{},
 		watchedDirs: map[string]int{},
 		debounce:    map[string]*time.Timer{},
 		seen:        map[string]string{},
 		lastGood:    map[string]string{},
+		inflight:    map[string]*flight{},
 		idleSince:   time.Now(),
 	}
 }
@@ -738,25 +740,56 @@ func (s *server) fileList() []fileMeta {
 	return out
 }
 
-func (s *server) getSVG(file string, sketch bool, layout string) (string, error) {
+type rendered struct {
+	svg  string
+	hash string
+}
+
+type flight struct {
+	done chan struct{}
+	svg  string
+	err  error
+}
+
+// getSVG renders the file's current content, keyed by its hash so a render that
+// raced a newer save is never served for it.
+func (s *server) getSVG(file string, sketch bool, layout string) (svg, hash string, err error) {
+	src, err := os.ReadFile(file)
+	if err != nil {
+		return errorSVG("cannot read " + filepath.Base(file)), "", err
+	}
+	hash = contentHash(src)
 	key := cacheKey(file, sketch, layout)
 	s.mu.Lock()
 	cached, ok := s.cache[key]
 	s.mu.Unlock()
-	if ok {
-		return cached, nil
+	if ok && cached.hash == hash {
+		return cached.svg, hash, nil
 	}
 
-	svg, err := renderSVG(file, layout, sketch)
-	if err != nil {
-		// svg holds an errorSVG describing the failure; surface it without caching.
-		return svg, err
-	}
+	fkey := key + "|" + hash
 	s.mu.Lock()
-	s.cache[key] = svg
-	s.lastGood[key] = svg
+	f, running := s.inflight[fkey]
+	if !running {
+		f = &flight{done: make(chan struct{})}
+		s.inflight[fkey] = f
+	}
 	s.mu.Unlock()
-	return svg, nil
+	if running {
+		<-f.done
+		return f.svg, hash, f.err
+	}
+
+	f.svg, f.err = renderSVG(file, src, layout, sketch)
+	s.mu.Lock()
+	delete(s.inflight, fkey)
+	if f.err == nil {
+		s.cache[key] = rendered{svg: f.svg, hash: hash}
+		s.lastGood[key] = f.svg
+	}
+	s.mu.Unlock()
+	close(f.done)
+	return f.svg, hash, f.err
 }
 
 func (s *server) invalidate(file string) {
@@ -894,14 +927,22 @@ func (s *server) idleMonitor() {
 	}
 }
 
-func renderSVG(file, layout string, sketch bool) (string, error) {
-	args := []string{file, "--stdout-format", "svg", "--layout", layout}
+func renderSVG(file string, src []byte, layout string, sketch bool) (string, error) {
+	if svg, ok, err := renderInProcess(file, src, layout, sketch); ok {
+		if err != nil {
+			return errorSVG("d2 render failed: " + err.Error()), err
+		}
+		return svg, nil
+	}
+	args := []string{"-", "--stdout-format", "svg", "--layout", layout}
 	if sketch {
 		args = append(args, "--sketch")
 	}
 	args = append(args, "-")
 
 	cmd := exec.Command("d2", args...)
+	cmd.Dir = filepath.Dir(file)
+	cmd.Stdin = bytes.NewReader(src)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -973,7 +1014,7 @@ func (s *server) handleOpen(w http.ResponseWriter, r *http.Request) {
 		layout = s.layout
 	}
 	// Warm the cache for the combo the new tab will request.
-	go func() { _, _ = s.getSVG(abs, req.Sketch, layout) }()
+	go func() { _, _, _ = s.getSVG(abs, req.Sketch, layout) }()
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -1034,7 +1075,7 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if file == "" {
 		svg = errorSVG("no file open")
 	} else {
-		svg, _ = s.getSVG(file, sketch, layout)
+		svg, _, _ = s.getSVG(file, sketch, layout)
 	}
 
 	base := filepath.Base(file)
@@ -1071,7 +1112,8 @@ func (s *server) handleSVG(w http.ResponseWriter, r *http.Request) {
 		layout = s.layout
 	}
 	sketch := q.Get("sketch") == "true"
-	svg, err := s.getSVG(file, sketch, layout)
+	svg, hash, err := s.getSVG(file, sketch, layout)
+	w.Header().Set("X-D2-Hash", hash)
 	if err != nil && q.Get("edit") == "1" {
 		// The editor shows the error next to the code; keep the diagram in place.
 		s.mu.Lock()

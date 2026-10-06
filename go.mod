@@ -5,10 +5,12 @@ go 1.25
 require (
 	github.com/fsnotify/fsnotify v1.8.0
 	oss.terrastruct.com/d2 v0.7.2-0.20260807033210-716f6185da68
+	oss.terrastruct.com/util-go v0.1.0
 )
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.0 // indirect
+	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/d2lang/util-go v0.2.0 // indirect

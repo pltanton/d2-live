@@ -100,13 +100,32 @@ instance.on('panend', () => {
 instance.on('zoomend', saveState);
 
 const GRID = 24;
+const grid = document.createElement('div');
+grid.id = 'grid';
+viewer.prepend(grid);
+let gridScale = 0;
+let frame = 0;
+let settle = null;
+
 function syncGrid() {
+  frame = 0;
   const t = instance.getTransform();
   const size = GRID * t.scale;
-  viewer.style.backgroundSize = size + 'px ' + size + 'px';
-  viewer.style.backgroundPosition = t.x + 'px ' + t.y + 'px';
+  if (t.scale !== gridScale) {
+    gridScale = t.scale;
+    grid.style.backgroundSize = size + 'px ' + size + 'px';
+  }
+  const dx = ((t.x % size) + size) % size - size;
+  const dy = ((t.y % size) + size) % size - size;
+  grid.style.transform = 'translate3d(' + dx + 'px,' + dy + 'px,0)';
 }
-instance.on('transform', syncGrid);
+
+instance.on('transform', () => {
+  if (!frame) frame = requestAnimationFrame(syncGrid);
+  viewer.classList.add('moving');
+  clearTimeout(settle);
+  settle = setTimeout(() => viewer.classList.remove('moving'), 180);
+});
 syncGrid();
 
 let hudTimer = null;
@@ -245,12 +264,20 @@ copyPngButton.addEventListener('click', copyPng);
 downloadSvgButton.addEventListener('click', downloadSvg);
 downloadPngButton.addEventListener('click', downloadPng);
 
+let svgRequested = 0;
+let svgShown = 0;
+
 async function reloadSvg() {
+  const seq = ++svgRequested;
   try {
     const response = await fetch('/svg?' + query('ts=' + Date.now() + (state.edit ? '&edit=1' : '')));
     const svg = await response.text();
+    if (seq < svgShown) {
+      return;
+    }
+    svgShown = seq;
     scene.innerHTML = svg;
-    document.dispatchEvent(new CustomEvent('d2l:svg', {detail: {error: response.headers.get('X-D2-Error')}}));
+    document.dispatchEvent(new CustomEvent('d2l:svg', {detail: {error: response.headers.get('X-D2-Error'), hash: response.headers.get('X-D2-Hash')}}));
   } catch (err) {
     showToast('update failed');
   }

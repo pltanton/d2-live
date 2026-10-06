@@ -290,20 +290,31 @@ html, body {
   cursor: grabbing;
 }
 #scene {
+  position: relative;
   width: 100%;
   height: 100%;
   display: block;
 }
 #viewer {
-  --canvas: #f3f5f9;
-  --canvas-dot: rgba(100, 116, 139, 0.2);
-  --grid: 24px;
-  background-color: var(--canvas);
-  background-image: radial-gradient(circle, var(--canvas-dot) 1.2px, transparent 1.4px);
-  background-size: var(--grid) var(--grid);
+  background-color: #dcdfe5;
 }
-body.editing #viewer {
-  --canvas-dot: rgba(100, 116, 139, 0.34);
+#grid {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(100% + 600px);
+  height: calc(100% + 600px);
+  display: none;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(51, 65, 85, 0.16) 1.2px, transparent 1.4px);
+  background-size: 24px 24px;
+  will-change: transform;
+}
+body.editing #grid {
+  display: block;
+}
+#viewer.moving #scene {
+  will-change: transform;
 }
 /* d2 paints its own white backdrop as the first rect; the canvas replaces it on
    screen only, exports still carry it. */

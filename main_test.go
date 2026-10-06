@@ -93,8 +93,8 @@ func TestCloseReleasesFileState(t *testing.T) {
 	s.register(one)
 	s.register(two)
 	s.mu.Lock()
-	s.cache[cacheKey(one, false, "elk")] = "<svg/>"
-	s.cache[cacheKey(two, false, "elk")] = "<svg/>"
+	s.cache[cacheKey(one, false, "elk")] = rendered{svg: "<svg/>"}
+	s.cache[cacheKey(two, false, "elk")] = rendered{svg: "<svg/>"}
 	s.mu.Unlock()
 
 	s.unregister(one)

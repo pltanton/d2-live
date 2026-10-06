@@ -120,6 +120,9 @@ func (s *server) handleSource(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// Tabs re-fetch now instead of after the watcher's debounce; the render
+		// cache is keyed by content hash, so the watcher's later reload is a hit.
+		s.notify(abs, "reload")
 		writeJSON(w, http.StatusOK, map[string]string{"hash": hash})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
